@@ -9,24 +9,28 @@
 #include <sftd.h>
 #include <queue>
 #include <sstream>
+#include <cctype>
 
-#include "yellowbg_png.h"
-#include "impact_ttf.h"
 #include "chiaro_otf.h"
 #include "bgbottom_png.h"
 #include "ocarina_png.h"
 #include "itemblock_png.h"
 #include "buttons_png.h"
 #include "pressed_png.h"
-#include "cleff_png.h"
-#include "selected_png.h"
 
 using namespace std;
 
-// Wave buffer
-ndspWaveBuf waveBuf;
-u8* data = NULL;
-u8* data2 = NULL;
+string upperStr(string in) {
+	for (int i = 0; i < in.size(); ++i) {
+		in[i] = toupper(in[i]);
+	}
+	return in;
+}
+
+string boolToStr( bool in ) {
+	if (in == true) return "True";
+	else return "False";
+}
 
 string intToStr( int num )
 {
@@ -99,143 +103,200 @@ int detectSong(string song) {
 	return -1;
 }
 
-int playWav(string path, int channel = 1, bool toloop = true) {
-	u32 sampleRate;
-	u32 dataSize;
-	u16 channels;
-	u16 bitsPerSample;
+typedef enum {
+	TYPE_UNKNOWN = -1,
+	TYPE_OGG = 0,
+	TYPE_WAV = 1
+} source_type;
+
+typedef struct {
+	source_type type;
 	
-	ndspSetOutputMode(NDSP_OUTPUT_STEREO);
-	ndspSetOutputCount(2); // Num of buffers
-	
-	// Reading wav file
-	FILE* fp = fopen(path.c_str(), "rb");
-	
-	if(!fp)
-	{
-		printf("Could not open the example.wav file.\n");
+	float rate;
+	u32 channels;
+	u32 encoding;
+	u32 nsamples;
+	u32 size;
+	char* data;
+	bool loop;
+	int audiochannel;
+
+	float mix[12];
+	ndspInterpType interp;
+} source;
+
+bool channelList[24];
+
+int getOpenChannel() {
+
+	for (int i = 0; i <= 23; i++) {
+		if (!channelList[i]) {
+			channelList[i] = true;
+			return i;
+		}
+	}
+
+	return -1;
+
+}
+
+const char *sourceInit(source *self, const char *filename) {
+	FILE *file = fopen(filename, "rb");
+	if (file) {
+		bool valid = true;
+		char buff[8];
+
+		// Master chunk
+		fread(buff, 4, 1, file); // ckId
+		if (strncmp(buff, "RIFF", 4) != 0) valid = false;
+
+		fseek(file, 4, SEEK_CUR); // skip ckSize
+
+		fread(buff, 4, 1, file); // WAVEID
+		if (strncmp(buff, "WAVE", 4) != 0) valid = false;
+
+		// fmt Chunk
+		fread(buff, 4, 1, file); // ckId
+		if (strncmp(buff, "fmt ", 4) != 0) valid = false;
+
+		fread(buff, 4, 1, file); // ckSize
+		if (*buff != 16) valid = false; // should be 16 for PCM format
+
+		fread(buff, 2, 1, file); // wFormatTag
+		if (*buff != 0x0001) valid = false; // PCM format
+
+		u16 channels;
+		fread(&channels, 2, 1, file); // nChannels
+		self->channels = channels;
+		
+		u32 rate;
+		fread(&rate, 4, 1, file); // nSamplesPerSec
+		self->rate = rate;
+
+		fseek(file, 4, SEEK_CUR); // skip nAvgBytesPerSec
+
+		u16 byte_per_block; // 1 block = 1*channelCount samples
+		fread(&byte_per_block, 2, 1, file); // nBlockAlign
+
+		u16 byte_per_sample;
+		fread(&byte_per_sample, 2, 1, file); // wBitsPerSample
+		byte_per_sample /= 8; // bits -> bytes
+
+		// There may be some additionals chunks between fmt and data
+		fread(&buff, 4, 1, file); // ckId
+		while (strncmp(buff, "data", 4) != 0) {
+			u32 size;
+			fread(&size, 4, 1, file); // ckSize
+
+			fseek(file, size, SEEK_CUR); // skip chunk
+
+			int i = fread(&buff, 4, 1, file); // next chunk ckId
+
+			if (i < 4) { // reached EOF before finding a data chunk
+				valid = false;
+				break;
+			}
+		}
+
+		// data Chunk (ckId already read)
+		u32 size;
+		fread(&size, 4, 1, file); // ckSize
+		self->size = size;
+
+		self->nsamples = self->size / byte_per_block;
+
+		if (byte_per_sample == 1) self->encoding = NDSP_ENCODING_PCM8;
+		else if (byte_per_sample == 2) self->encoding = NDSP_ENCODING_PCM16;
+		else return "unknown encoding, needs to be PCM8 or PCM16";
+
+		if (!valid) {
+			fclose(file);
+			return "invalid PCM wav file";
+		}
+
+		self->audiochannel = getOpenChannel();
+		self->loop = false;
+
+		// Read data
+		if (linearSpaceFree() < self->size) return "not enough linear memory available";
+		self->data = (char*)linearAlloc(self->size);
+
+		fread(self->data, self->size, 1, file);
+
+
+		fclose(file);
+	}
+	else return "file not found";
+	return "ok";
+}
+
+int sourcePlay(source *self) { // source:play()
+
+	if (self->audiochannel == -1) {
 		return -1;
 	}
-	
-	char signature[4];
-	
-	fread(signature, 1, 4, fp);
-	
-	if( signature[0] != 'R' &&
-		signature[1] != 'I' &&
-		signature[2] != 'F' &&
-		signature[3] != 'F')
-	{
-		printf("Wrong file format.\n");
-		fclose(fp);
-		return -1;
+
+	ndspChnWaveBufClear(self->audiochannel);
+	ndspChnReset(self->audiochannel);
+	ndspChnInitParams(self->audiochannel);
+	ndspChnSetMix(self->audiochannel, self->mix);
+	ndspChnSetInterp(self->audiochannel, self->interp);
+	ndspChnSetRate(self->audiochannel, self->rate);
+	ndspChnSetFormat(self->audiochannel, NDSP_CHANNELS(self->channels) | NDSP_ENCODING(self->encoding));
+
+	ndspWaveBuf* waveBuf = (ndspWaveBuf*)calloc(1, sizeof(ndspWaveBuf));
+
+	waveBuf->data_vaddr = self->data;
+	waveBuf->nsamples = self->nsamples;
+	waveBuf->looping = self->loop;
+
+	DSP_FlushDataCache((u32*)self->data, self->size);
+
+	ndspChnWaveBufAdd(self->audiochannel, waveBuf);
+
+	return self->audiochannel;
+}
+
+int sourceStop(source *self) { // source:stop()
+	ndspChnWaveBufClear(self->audiochannel);
+	return 0;
+}
+
+bool sourceIsPlaying(source *self) { // source:isPlaying()
+	return ndspChnIsPlaying(self->audiochannel);
+}
+
+double sourceGetDuration(source *self) { // source:getDuration()
+	return (double)(self->nsamples) / self->rate;
+}
+
+double sourceTell(source *self) { // source:tell()
+	if (!ndspChnIsPlaying(self->audiochannel)) {
+		return 0;
+	} else {
+		return (double)(ndspChnGetSamplePos(self->audiochannel)) / self->rate;
 	}
-	
-	fseek(fp, 40, SEEK_SET);
-	fread(&dataSize, 4, 1, fp);
-	fseek(fp, 22, SEEK_SET);
-	fread(&channels, 2, 1, fp);
-	fseek(fp, 24, SEEK_SET);
-	fread(&sampleRate, 4, 1, fp);
-	fseek(fp, 34, SEEK_SET);
-	fread(&bitsPerSample, 2, 1, fp);
-	
-	if(dataSize == 0 || (channels != 1 && channels != 2) ||
-		(bitsPerSample != 8 && bitsPerSample != 16))
-	{
-		printf("Corrupted wav file.\n");
-		fclose(fp);
-		return -1;
-	}
-	
-	int usingData = 0;
-	if (!data) {
-		if (data2) linearFree(data2); data2 = NULL;
-		usingData = 1;
-		// Allocating and reading samples
-		data = static_cast<u8*>(linearAlloc(dataSize));
-		fseek(fp, 44, SEEK_SET);
-		fread(data, 1, dataSize, fp);
-		fclose(fp);
-	}
-	
-	else if (!data2) {
-		usingData = 2;
-		data2 = static_cast<u8*>(linearAlloc(dataSize));
-		fseek(fp, 44, SEEK_SET);
-		fread(data2, 1, dataSize, fp);
-		fclose(fp);
-	}
-	
-	else {
-		linearFree(data); data = NULL;
-		usingData = 1;
-		data = static_cast<u8*>(linearAlloc(dataSize));
-		fseek(fp, 44, SEEK_SET);
-		fread(data, 1, dataSize, fp);
-		fclose(fp);
-	}
-	
-	
-	fseek(fp, 44, SEEK_SET);
-	fread(data, 1, dataSize, fp);
-	fclose(fp);
-	
-	// Find the right format
-	u16 ndspFormat;
-	
-	if(bitsPerSample == 8)
-	{
-		ndspFormat = (channels == 1) ?
-			NDSP_FORMAT_MONO_PCM8 :
-			NDSP_FORMAT_STEREO_PCM8;
-	}
-	else
-	{
-		ndspFormat = (channels == 1) ?
-			NDSP_FORMAT_MONO_PCM16 :
-			NDSP_FORMAT_STEREO_PCM16;
-	}
-	
-	ndspChnReset(channel);
-	ndspChnSetInterp(channel, NDSP_INTERP_NONE);
-	ndspChnSetRate(channel, float(sampleRate));
-	ndspChnSetFormat(channel, ndspFormat);
-	
-	// Create and play a wav buffer
-	std::memset(&waveBuf, 0, sizeof(waveBuf));
-	
-	waveBuf.data_vaddr = reinterpret_cast<u32*>(data);
-	waveBuf.nsamples = dataSize / (bitsPerSample >> 3);
-	waveBuf.looping = false;
-	waveBuf.status = NDSP_WBUF_FREE;
-	
-	if (usingData == 1) DSP_FlushDataCache(data, dataSize);
-	else DSP_FlushDataCache(data2, dataSize);
-	
-	ndspChnWaveBufAdd(channel, &waveBuf);
-	
-	return ((dataSize / (bitsPerSample >> 3)) / sampleRate); // Return duration
-	
 }
 
 void songSequence(int index) {
-	sftd_font *font = sftd_load_font_mem(chiaro_otf, chiaro_otf_size);
-	sf2d_texture *background = sfil_load_PNG_buffer(yellowbg_png, SF2D_PLACE_RAM);
+	sftd_font    *font = sftd_load_font_mem(chiaro_otf, chiaro_otf_size);
 	sf2d_texture *bgbot = sfil_load_PNG_buffer(bgbottom_png, SF2D_PLACE_RAM);
 	sf2d_texture *oot = sfil_load_PNG_buffer(ocarina_png, SF2D_PLACE_RAM);
 	sf2d_texture *itemblock = sfil_load_PNG_buffer(itemblock_png, SF2D_PLACE_RAM);
 	sf2d_texture *buttons = sfil_load_PNG_buffer(buttons_png, SF2D_PLACE_RAM);
 	
+	source* song = new source;
+	
 	float alpha = 0;
 	bool fade = true;
 	
-	ndspChnWaveBufClear(7);
 	string path = "sdmc:/3ds/orchestrina/data/song"+intToStr(index)+".wav";
 	string played = songnames[index]+".";
-	int duration = playWav(path,7,false);
-	int frame = 0;
-	while (frame < (duration*30)) {
+	
+	sourceInit(song, path.c_str());
+	sourcePlay(song);
+	
+	while (sourceTell(song) != 0) {
 		hidScanInput();
 		u32 keys = hidKeysDown();
 		u32 released = hidKeysUp();
@@ -254,7 +315,7 @@ void songSequence(int index) {
 			sf2d_draw_texture(itemblock, 75, 10);
 			sf2d_draw_texture(oot, 15, 15);
 			sf2d_draw_texture(buttons, 100, 100);
-			sf2d_draw_rectangle(100, 100, 120, 26, RGBA8(0xFF, 0x00, 0x00, (int)alpha));
+			sf2d_draw_rectangle(100, 100, 120, 26, RGBA8(255, 255, 0, (int)alpha));
 		sf2d_end_frame();
 		sf2d_swapbuffers();
 		
@@ -263,14 +324,7 @@ void songSequence(int index) {
 		
 		if (alpha > 0 && !fade) alpha -= 2;
 		else fade = true;
-		
-		++frame;
 	}
-	
-	for (int i = 1; i < 22; ++i) {
-		ndspChnWaveBufClear(i);
-	}
-	linearFree(data);
 }
 
 int main(int argc, char* argv[])
@@ -282,21 +336,33 @@ int main(int argc, char* argv[])
 	sf2d_set_3D(0);
 	
 	sftd_init();
-
-	sftd_font *font = sftd_load_font_mem(impact_ttf, impact_ttf_size);
-	sf2d_texture *background = sfil_load_PNG_buffer(yellowbg_png, SF2D_PLACE_RAM);
+	sftd_font    *font = sftd_load_font_mem(chiaro_otf, chiaro_otf_size);
 	sf2d_texture *bgbot = sfil_load_PNG_buffer(bgbottom_png, SF2D_PLACE_RAM);
 	sf2d_texture *oot = sfil_load_PNG_buffer(ocarina_png, SF2D_PLACE_RAM);
 	sf2d_texture *itemblock = sfil_load_PNG_buffer(itemblock_png, SF2D_PLACE_RAM);
 	sf2d_texture *buttons = sfil_load_PNG_buffer(buttons_png, SF2D_PLACE_RAM);
-	sf2d_texture *cleff = sfil_load_PNG_buffer(cleff_png, SF2D_PLACE_RAM);
-	sf2d_texture *selected = sfil_load_PNG_buffer(selected_png, SF2D_PLACE_RAM);
 	
 	// Initialize ndsp
 	ndspInit();
+	ndspSetOutputCount(23);
 	
 	string playingsong = "";
 	int currnote = 0;
+	
+	int playRes = -1;
+	
+	source* ocarina1 = new source;
+	sourceInit(ocarina1, "sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_D_long.wav");
+	source* ocarina2 = new source;
+	sourceInit(ocarina2, "sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_B_long.wav");
+	source* ocarina3 = new source;
+	sourceInit(ocarina3, "sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_A_long.wav");
+	source* ocarina4 = new source;
+	sourceInit(ocarina4, "sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_D2_long.wav");
+	source* ocarina5 = new source;
+	sourceInit(ocarina5, "sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_F_long.wav");
+	source* correct = new source;
+	sourceInit(correct, "sdmc:/3ds/orchestrina/data/OOT_Song_Correct.wav");
 	
 	int textWidth = 0;
 	int textHeight = 0;
@@ -321,35 +387,39 @@ int main(int argc, char* argv[])
 		
 		if((keys & KEY_L) && !pressedL) {
 			pressedL = true;
-			playWav("sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_D_long.wav",2,false);
+			
+			playRes = sourcePlay(ocarina1);
 			playingsong.push_back('l');
 			++currnote;
 		}
 		
 		if((keys & KEY_X) && !pressedX) {
 			pressedX = true;
-			playWav("sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_B_long.wav",3, false);
+			
+			playRes = sourcePlay(ocarina2);
 			playingsong.push_back('x');
 			++currnote;
 		}
 		
 		if((keys & KEY_Y) && !pressedY) {
 			pressedY = true;
-			playWav("sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_A_long.wav",4,false);
+			playRes = sourcePlay(ocarina3);
 			playingsong.push_back('y');
 			++currnote;
 		}
 		
 		if((keys & KEY_A) && !pressedA) {
 			pressedA = true;
-			playWav("sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_D2_long.wav",5,false);
+			
+			playRes = sourcePlay(ocarina4);
 			playingsong.push_back('a');
 			++currnote;
 		}
 		
 		if((keys & KEY_R) && !pressedR) {
 			pressedR = true;
-			playWav("sdmc:/3ds/orchestrina/data/OOT_Notes_Ocarina_F_long.wav",6,false);
+			
+			playRes = sourcePlay(ocarina5);
 			playingsong.push_back('r');
 			++currnote;
 		}
@@ -363,7 +433,11 @@ int main(int argc, char* argv[])
 		sf2d_start_frame(GFX_TOP, GFX_LEFT);
 
 			sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0, 0, 0, 255));
-			sftd_draw_text(font, 5, 20, RGBA8(0, 0, 0, 255), 12, playingsong.c_str());
+			sftd_draw_text(font, 5, 20, RGBA8(255, 255, 255, 255), 24, upperStr(playingsong).c_str());
+			sftd_draw_text(font, 5, 50, RGBA8(255, 255, 255, 255), 12, ("Channel: "+intToStr(playRes)).c_str());
+			string play = "L: "+boolToStr(sourceIsPlaying(ocarina1))+" R: "+boolToStr(sourceIsPlaying(ocarina2))+" X: "+boolToStr(sourceIsPlaying(ocarina3))+\
+			" Y: "+boolToStr(sourceIsPlaying(ocarina4))+" A: "+boolToStr(sourceIsPlaying(ocarina5));
+			sftd_draw_text(font, 5, 70, RGBA8(255, 255, 255, 255), 12, (play.c_str()));
 
 		sf2d_end_frame();
 		
@@ -383,8 +457,8 @@ int main(int argc, char* argv[])
 		if (playingsong.size() > playingsong.max_size()) playingsong = "";
 
 		if (songtrigger != -1) {
-			ndspChnWaveBufClear(1);
-			playWav("sdmc:/3ds/orchestrina/data/OOT_Song_Correct.wav",1,false);
+			
+			playRes = sourcePlay(correct);
 			playingsong = "";
 			sf2d_swapbuffers();
 			svcSleepThread(1500000000);
@@ -394,15 +468,12 @@ int main(int argc, char* argv[])
 		}
 		songtrigger = detectSong(playingsong);
 		
+		if (playingsong.size() > 20) {
+			playingsong = playingsong.substr(playingsong.size()-20, 20);
+		}
+		
 		sf2d_swapbuffers();
 	}
-	
-	for (int i = 1; i < 22; ++i) {
-		ndspChnWaveBufClear(i);
-	}
-	
-	linearFree(data);
-	linearFree(data2);
 	
 	sftd_free_font(font);
 	

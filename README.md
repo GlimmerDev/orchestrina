@@ -1,3 +1,3 @@
-# template
+# Orchestrina
 
-This is a template for starting new 3DS libctru projects.
+A homebrew Ocarina allowing you to play songs from many Zelda games. Also has a free play mode. Requires sf2dlib, sfillib, sftdlib, and portlibs to build.

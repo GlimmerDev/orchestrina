@@ -28,3 +28,11 @@
 *.out
 *.app
 *.bat
+*.3dsx
+*.cia
+*.sdmh
+*.elf
+*.lnk
+
+build
+citra

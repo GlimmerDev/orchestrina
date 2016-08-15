@@ -21,7 +21,9 @@
 #define SAMPLERATE 22050
 #define BYTESPERSAMPLE 4
 
-#define WAVBUFCOUNT 7
+#define MAXNOTES 16
+
+#define WAVBUFCOUNT (MAXNOTES+2)
 #define SONGWAVBUF (WAVBUFCOUNT-1)
 
 using namespace std;
@@ -29,30 +31,43 @@ using namespace std;
 // One wavebuf for each of the current instrument's notes, one for each sound effect, one for the current full song playing
 ndspWaveBuf waveBuf[WAVBUFCOUNT];
 
-// Converts string to uppercase characters
-string upperStr(string in) {
-	for (u32 i = 0; i < in.size(); ++i) {
-		in[i] = toupper(in[i]);
-	}
-	return in;
-}
+bool wavbufList[WAVBUFCOUNT];
 
-// Converts boolean value to string
-string boolToStr( bool in ) {
-	if (in == true) return "True";
-	else return "False";
-}
+// Source type
+typedef enum {
+	TYPE_UNKNOWN = -1,
+	TYPE_OGG = 0,
+	TYPE_WAV = 1
+} source_type;
 
-// Converts integer value to string
-string intToStr( int num )
-{
-	stringstream ss;
-	ss << num;
-	return ss.str();
-}
+// Instrument
+typedef struct {
+    string name;
+    u16 notes;
+} instrument;
 
+// Source
+typedef struct {
+	// source_type type;
+	
+	// float rate;
+	// u32 channels;
+	// u32 encoding;
+	u32 nsamples;
+	u32 size;
+	char* data;
+	bool loop;
+	int wbuf;
+    int channel;
+
+	// float mix[12];
+	// ndspInterpType interp;
+} source;
+
+source* notes[MAXNOTES];
 
 // Array of note sequences
+// TODO: separate by instrument
 string playable[25] = {
 	"zzzzzz",  // NULL
 	"xayxay",  // Zelda's Lullaby
@@ -82,6 +97,7 @@ string playable[25] = {
 };
 
 // Array of song titles
+// TODO: separate by instrument
 string songnames[25] = {
 	"NULL",
 	"Zelda's Lullaby",
@@ -110,6 +126,37 @@ string songnames[25] = {
 	"NULL"
 };
 
+// Array of instruments
+instrument instruments[5] = {
+	{"NULL", 0},
+    {"Ocarina", 5},
+    {"Pipes", 5},
+    {"Drums", 5},
+    {"Guitar", 5}
+};
+
+// Converts string to uppercase characters
+string upperStr(string in) {
+	for (u32 i = 0; i < in.size(); ++i) {
+		in[i] = toupper(in[i]);
+	}
+	return in;
+}
+
+// Converts boolean value to string
+string boolToStr( bool in ) {
+	if (in == true) return "True";
+	else return "False";
+}
+
+// Converts integer value to string
+string intToStr( int num )
+{
+	stringstream ss;
+	ss << num;
+	return ss.str();
+}
+
 // Detects if a song has been played by the player
 int detectSong(string song) {
 	for (u32 i = 0; i < sizeof(playable)/sizeof(playable[0]); ++i) {
@@ -119,36 +166,7 @@ int detectSong(string song) {
 	return -1;
 }
 
-// Source type
-/*
-typedef enum {
-	TYPE_UNKNOWN = -1,
-	TYPE_OGG = 0,
-	TYPE_WAV = 1
-} source_type;
-*/
-
-// Source
-typedef struct {
-	// source_type type;
-	
-	// float rate;
-	// u32 channels;
-	// u32 encoding;
-	u32 nsamples;
-	u32 size;
-	char* data;
-	bool loop;
-	int wbuf;
-    bool playing;
-
-	// float mix[12];
-	// ndspInterpType interp;
-} source;
-
-bool wavbufList[WAVBUFCOUNT];
-
-// Returns the first unused DSP channel available for use
+// Returns the first unused wavBuf available for use
 int getOpenWavbuf() {
 
 	for (int i = 0; i <= WAVBUFCOUNT; i++) {
@@ -163,7 +181,7 @@ int getOpenWavbuf() {
 }
 
 // Initializes an audio source and returns any errors that may occur
-string sourceInit(source *self, const char *filename, int wbuf = -1) {
+int sourceInit(source *self, const char *filename, int channel, int wbuf = -1) {
 	FILE *file = fopen(filename, "rb");
 	if (file) {
         fseek(file, 0, SEEK_END);
@@ -177,7 +195,7 @@ string sourceInit(source *self, const char *filename, int wbuf = -1) {
         self->nsamples = (self->size / 2);
 
 		// Read data
-		if (linearSpaceFree() < self->size) return "not enough linear memory available";
+		if (linearSpaceFree() < self->size) return -1;
 		self->data = (char*)linearAlloc(self->size);
 
 		fread(self->data, self->size, 1, file);
@@ -187,43 +205,47 @@ string sourceInit(source *self, const char *filename, int wbuf = -1) {
         waveBuf[self->wbuf].data_vaddr = self->data;
         waveBuf[self->wbuf].nsamples = self->nsamples;
         waveBuf[self->wbuf].looping = self->loop;
-
-        self->playing = false;
+        
+        self->channel = channel;
 	}
-	else return "file not found";
-	return "ok";
-}
-
-// Plays an initialized audio source on its assigned DSP channel
-source *sourcePlay(source *self, int channel = 0) { // source:play()
-
-	if (self->wbuf == -1) {
-		return NULL;
-	}
-    
-    DSP_FlushDataCache((u32*)self->data, self->size);
-
-	// ndspChnWaveBufAdd(self->wbuf, &waveBuf[self->wbuf]);
-    ndspChnWaveBufAdd(channel, &waveBuf[self->wbuf]);
-    
-    self->playing = true;
-
-	// return self->wbuf;
-    return self;
-}
-
-// Stop playback of an audio source
-int sourceStop(source *self, int channel = 0) { // source:stop()
-	// ndspChnWaveBufClear(self->wbuf);
-    ndspChnWaveBufClear(channel);
-    self->playing = false;
+	else return -2;
 	return 0;
 }
 
-// Checks if audio source is playing on its assigned DSP channel
-bool sourceIsPlaying(source *self, int channel = 0) { // source:isPlaying()
-	return ndspChnIsPlaying(channel);
-    // return self->playing;
+// Frees an audio source and its wavBuf
+void sourceFree(source *self) {
+    if (self==NULL) return;
+    wavbufList[self->wbuf] = false;
+    if (waveBuf[self->wbuf].status == NDSP_WBUF_PLAYING || waveBuf[self->wbuf].status==NDSP_WBUF_QUEUED) ndspChnWaveBufClear(self->channel);
+    delete self;
+}
+
+// Initializes an instrument and returns any errors that may occur
+int instrumentInit(u8 id) {
+    for (int i = 0; i < instruments[id].notes; i++) {
+        string path = "/3ds/orchestrina/data/"+instruments[id].name+intToStr(i)+".pcm";
+        sourceFree(notes[i]);
+        notes[i] = new source;
+        int result = sourceInit(notes[i], path.c_str(), 0);
+        if (result!=0) return -1;
+    }
+    return 0;
+}
+
+void instrumentFree(u8 id) {
+    for (int i = 0; i < instruments[id].notes; i++) sourceFree(notes[i]);
+}
+
+// Plays an initialized audio source on its assigned DSP channel
+int sourcePlay(source *self) { // source:play()
+
+	if (self==NULL || self->wbuf == -1) return -1;
+
+    DSP_FlushDataCache((u32*)self->data, self->size);
+
+    ndspChnWaveBufAdd(self->channel, &waveBuf[self->wbuf]);
+
+	return self->wbuf;
 }
 
 // Returns duration of audio source in seconds
@@ -232,11 +254,11 @@ double sourceGetDuration(source *self) { // source:getDuration()
 }
 
 // Returns playback position of audio source in seconds
-double sourceTell(source *self, int channel = 0) { // source:tell()
-	if (!ndspChnIsPlaying(channel)) {
+double sourceTell(source *self) { // source:tell()
+	if (!ndspChnIsPlaying(self->channel)) {
 		return 0;
 	} else {
-		return (double)(ndspChnGetSamplePos(channel)) / SAMPLERATE;
+		return (double)(ndspChnGetSamplePos(self->channel)) / SAMPLERATE;
 	}
 }
 
@@ -256,8 +278,8 @@ void songSequence(int index) {
 	string path = "/3ds/orchestrina/data/song"+intToStr(index)+".pcm";
 	string played = songnames[index]+".";
 	
-	sourceInit(song, path.c_str(), SONGWAVBUF);
-	sourcePlay(song, 1);
+	sourceInit(song, path.c_str(), 1, SONGWAVBUF);
+	sourcePlay(song);
 	
     while (aptMainLoop() && waveBuf[SONGWAVBUF].status != NDSP_WBUF_DONE) {
 		hidScanInput();
@@ -297,7 +319,7 @@ void songSequence(int index) {
     sf2d_free_texture(itemblock);
     sf2d_free_texture(buttons);
 
-    delete song;
+    sourceFree(song);
 }
 
 int main(int argc, char* argv[])
@@ -345,39 +367,27 @@ int main(int argc, char* argv[])
     memset(waveBuf,0,sizeof(waveBuf));
 
 	/* Audio sources */
-    // TODO: organize instruments notes in arrays
     // Load Ocarina by default
-	source* ocarina1 = new source;
-	sourceInit(ocarina1, "/3ds/orchestrina/data/Ocarina_D.pcm");
-	source* ocarina2 = new source;
-	sourceInit(ocarina2, "/3ds/orchestrina/data/Ocarina_B.pcm");
-    source* ocarina3 = new source;
-	sourceInit(ocarina3, "/3ds/orchestrina/data/Ocarina_A.pcm");
-	source* ocarina4 = new source;
-	sourceInit(ocarina4, "/3ds/orchestrina/data/Ocarina_D2.pcm");
-    source* ocarina5 = new source;
-	sourceInit(ocarina5, "/3ds/orchestrina/data/Ocarina_F.pcm");
+    instrumentInit(1);
     // Load sound effects
     source* correct = new source;
-	sourceInit(correct, "/3ds/orchestrina/data/Correct.pcm");
+	sourceInit(correct, "/3ds/orchestrina/data/Correct.pcm", 1);
 
 	// Last 20 played notes
 	string playingsong = "";
-	
-	// Debug result of playing audio
-	source* playRes = NULL;
-	
+
 	// Index of song played
 	int songtrigger = -1;
 
 	// Index of button being pressed
     int pressed = -1;
+
     // FOR REFERENCE:
-	// bool pressedL = false; // D
-	// bool pressedX = false; // B
-	// bool pressedY = false; // A
-	// bool pressedA = false; // D2
-	// bool pressedR = false; // F
+	// bool pressedL = false; // D (0)
+	// bool pressedX = false; // B (1)
+	// bool pressedY = false; // A (2)
+	// bool pressedA = false; // D2 (3)
+	// bool pressedR = false; // F (4)
 
 	while(aptMainLoop())
 	{
@@ -388,37 +398,37 @@ int main(int argc, char* argv[])
 
 		// Play notes on button presses
 		if((keys & KEY_L)) {
-            if ((pressed != KEY_L) && playRes) sourceStop(playRes);
+            if (pressed != KEY_L) ndspChnWaveBufClear(0);
             pressed = KEY_L;
-			playRes = sourcePlay(ocarina1);
+			sourcePlay(notes[0]);
 			playingsong.push_back('l');
 		}
 		
 		if((keys & KEY_X)) {
-            if ((pressed != KEY_X) && playRes) sourceStop(playRes);
+            if (pressed != KEY_X) ndspChnWaveBufClear(0);
             pressed = KEY_X;
-			playRes = sourcePlay(ocarina2);
+			sourcePlay(notes[1]);
 			playingsong.push_back('x');
 		}
 		
 		if((keys & KEY_Y)) {
-            if ((pressed != KEY_Y) && playRes) sourceStop(playRes);
+            if (pressed != KEY_Y) ndspChnWaveBufClear(0);
             pressed = KEY_Y;
-			playRes = sourcePlay(ocarina3);
+			sourcePlay(notes[2]);
 			playingsong.push_back('y');
 		}
 		
 		if((keys & KEY_A)) {
-            if ((pressed != KEY_A) && playRes) sourceStop(playRes);
+            if (pressed != KEY_A) ndspChnWaveBufClear(0);
             pressed = KEY_A;
-			playRes = sourcePlay(ocarina4);
+			sourcePlay(notes[3]);
 			playingsong.push_back('a');
 		}
 		
 		if((keys & KEY_R)) {
-            if ((pressed != KEY_R) && playRes) sourceStop(playRes);
+            if (pressed != KEY_R) ndspChnWaveBufClear(0);
             pressed = KEY_R;
-			playRes = sourcePlay(ocarina5);
+			sourcePlay(notes[4]);
 			playingsong.push_back('r');
 		}
         
@@ -460,7 +470,7 @@ int main(int argc, char* argv[])
 
 		// If song index is valid
 		if (songtrigger != -1) {
-			playRes = sourcePlay(correct, 1);
+			sourcePlay(correct);
             pressed = -1;
 			playingsong = "";
             sf2d_swapbuffers();
@@ -470,15 +480,13 @@ int main(int argc, char* argv[])
 		}
 
 		// Update song index
+        // TODO: check if song is compatible with current instrument
 		songtrigger = detectSong(playingsong);
 
 		// Keep note history short
 		if (playingsong.size() > 20) {
 			playingsong = playingsong.substr(playingsong.size()-20, 20);
 		}
-
-        // Stop when done
-        if (playRes && waveBuf[playRes->wbuf].status == NDSP_WBUF_DONE) sourceStop(playRes);
 
         // Exit on Start
 		if(keys & KEY_START) break;
@@ -494,13 +502,8 @@ int main(int argc, char* argv[])
     sf2d_free_texture(itemblock);
     sf2d_free_texture(buttons);
     
-    delete ocarina1;
-    delete ocarina2;
-    delete ocarina3;
-    delete ocarina4;
-    delete ocarina5;
-    delete correct;
-	// TODO: Free everything up correctly
+    instrumentFree(1);
+    sourceFree(correct);
 	
 	// Exit services
 	ndspExit();

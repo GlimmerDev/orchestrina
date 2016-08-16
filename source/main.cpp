@@ -402,7 +402,7 @@ int main(int argc, char* argv[])
             sf2d_draw_texture(bgbot, 0, 0);
             sf2d_draw_texture(itemblock, 10, 10);
             sf2d_draw_texture(itemblock, 75, 10);
-            sf2d_draw_texture(oot, 13, 13);
+            sf2d_draw_texture(oot, 12, 12);
             sf2d_draw_texture(buttons, 100, 100);
 
             // Red highlights when buttons pressed
@@ -447,7 +447,7 @@ int main(int argc, char* argv[])
                     sf2d_draw_texture(bgbot, 0, 0);
                     sf2d_draw_texture(itemblock, 10, 10);
                     sf2d_draw_texture(itemblock, 75, 10);
-                    sf2d_draw_texture(oot, 15, 15);
+                    sf2d_draw_texture(oot, 12, 12);
                     sf2d_draw_texture(buttons, 100, 100);
                     sf2d_draw_rectangle(100, 100, 120, 26, RGBA8(255, 255, 0, (int)alpha));
                 sf2d_end_frame();

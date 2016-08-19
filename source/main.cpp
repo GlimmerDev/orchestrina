@@ -291,6 +291,7 @@ int main(int argc, char* argv[]) {
     // Load fonts & textures
     sftd_font    *font  = sftd_load_font_file("romfs:/fonts/chiaro.otf");
     sf2d_texture *bgbot = sfil_load_PNG_file("romfs:/bgbottom.png", SF2D_PLACE_RAM);
+	sf2d_texture *bgtop = sfil_load_PNG_file("romfs:/bgtop.png", SF2D_PLACE_RAM);
     sf2d_texture *itemblock = sfil_load_PNG_file("romfs:/itemblock.png", SF2D_PLACE_RAM);
     sf2d_texture *itemblock_p = sfil_load_PNG_file("romfs:/itemblock_pressed.png", SF2D_PLACE_RAM);
     sf2d_texture *iicons[INSTRUMENTCOUNT];
@@ -349,6 +350,9 @@ int main(int argc, char* argv[]) {
 
     // Index of button being pressed
     u32 pressed = 0xFF;
+	
+	// Whether free play is on or not
+	bool freePlay = false;
 
     // FOR REFERENCE:
     // KEY_L    :   D (0)
@@ -390,6 +394,11 @@ int main(int argc, char* argv[]) {
             if (currentinstrument == INSTRUMENTCOUNT) currentinstrument = 0;
             instrumentInit(currentinstrument);
         }
+		
+		// Toggle free play (debug)
+		if (keys & KEY_DUP) {
+			freePlay = !freePlay;
+		}
 
         // Debug
         // if (keys & KEY_LEFT) submenu = 0;
@@ -397,12 +406,13 @@ int main(int argc, char* argv[]) {
 
         // Start top screen
         sf2d_start_frame(GFX_TOP, GFX_LEFT);
-
-            sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0, 0, 0, 255));
+			sf2d_draw_texture(bgtop, 0, 0);
+            //sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0, 0, 0, 255));
 
             //Debug stuff
             sftd_draw_text(font, 5, 20, RGBA8(255, 255, 255, 255), 24, upperStr(playingsong).c_str()); // Last 20 notes played
-            sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("Instrument: "+instruments[currentinstrument].name).c_str()); // Current instrument
+            sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("Instrument (SEL): "+instruments[currentinstrument].name).c_str()); // Current instrument
+			sftd_draw_text(font, 5, 220, RGBA8(255, 255, 255, 255), 12, ("Free Play (D-UP): "+boolToStr(freePlay)).c_str()); // Free Play enabled
 
         sf2d_end_frame();
 
@@ -411,7 +421,8 @@ int main(int argc, char* argv[]) {
         sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
 
             sf2d_draw_texture(bgbot, 0, 0);
-
+			sftd_draw_text(font, 0, 0, RGBA8(255, 255, 255, 255), 12, "v0.1.0 by Leif Ericson and Ryuzaki_MrL."); 
+			sftd_draw_text(font, 0, 15, RGBA8(255, 255, 255, 255), 12, "Top screen graphic by Sliter."); 
             for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
 
                 int x = (160 - notesets[instruments[currentinstrument].nset].notes * 14) + (i * 28);
@@ -467,7 +478,7 @@ int main(int argc, char* argv[]) {
         sf2d_end_frame();
 
         // If song index is valid
-        if (songtrigger != -1) {
+        if (songtrigger != -1 && !freePlay) {
             sourcePlay(correct);
             pressed = 0xFF;
             playingsong = "";
@@ -493,7 +504,8 @@ int main(int argc, char* argv[]) {
                 if (keys & KEY_B) break; // Cancel song playback
 
                 sf2d_start_frame(GFX_TOP, GFX_LEFT);
-                    sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0, 0, 0, 255));
+					sf2d_draw_texture(bgtop, 0, 0);
+                    //sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0, 0, 0, 255));
                     sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("You played "+played+".").c_str()); // Current song playing
                 sf2d_end_frame();
                 sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);

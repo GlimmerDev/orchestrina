@@ -385,20 +385,21 @@ int main(int argc, char* argv[]) {
             if ((released & keyset[i]) && pressed==i) pressed = 0xFF;
         }
 
-        // Clear played notes
-        // if (keys & KEY_B) playingsong = "";
-
         // Switch instrument (debug)
         if (keys & KEY_SELECT) {
             currentinstrument++;
             if (currentinstrument == INSTRUMENTCOUNT) currentinstrument = 0;
             instrumentInit(currentinstrument);
+            playingsong = "";
         }
-		
+
 		// Toggle free play (debug)
 		if (keys & KEY_DUP) {
 			freePlay = !freePlay;
 		}
+
+        // Clear played notes (debug)
+        if (keys & KEY_DDOWN) playingsong = "";
 
         // Debug
         // if (keys & KEY_LEFT) submenu = 0;

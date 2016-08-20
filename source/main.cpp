@@ -209,7 +209,7 @@ Result downloadSong(u16 songid) {
         return ret;
     }
 
-    ret = httpcGetResponseStatusCode(&context, &statuscode);
+    ret = httpcGetResponseStatusCode(&context, &statuscode, 0);
     if(R_FAILED(ret))
     {
         httpcCloseContext(&context);
@@ -264,6 +264,11 @@ Result downloadSong(u16 songid) {
     fclose(songfile);
 
     return 0;
+}
+
+// Detect if touch was within the specified coordinate region
+bool isTouchInRegion(touchPosition coords, int min_x, int max_x, int min_y, int max_y) {
+	return ((coords.px > min_x) && (coords.px <  max_x) && (coords.py > min_y) && (coords.py < max_y));
 }
 
 // Detects if a song has been played by the player
@@ -403,6 +408,7 @@ int main(int argc, char* argv[]) {
         sfil_load_PNG_file("romfs:/o_songs.png", SF2D_PLACE_RAM),
         sfil_load_PNG_file("romfs:/o_instruments.png", SF2D_PLACE_RAM)
     };
+	sf2d_texture *inventory = sfil_load_PNG_file("romfs:/inventory.png", SF2D_PLACE_RAM);
 
     // Create data path
     mkdir("/3ds", 0777);
@@ -480,12 +486,21 @@ int main(int argc, char* argv[]) {
 
     bool errorflag = false;
     Result errorcode = 0;
+	
+	// Position of inventory graphic
+	int invYPos = -240;
+	
+	bool invOpen = false;
+	
+	touchPosition touch;
 
     while(aptMainLoop()) {
         hidScanInput();
 
         u32 keys = hidKeysDown();
         u32 released = hidKeysUp();
+		
+		hidTouchRead(&touch);
 
         u32 keyset[MAXNOTES];
         memcpy(keyset, notesets[instruments[currentinstrument].nset].keys, MAXNOTES * sizeof(u32));
@@ -542,6 +557,35 @@ int main(int argc, char* argv[]) {
 
         // Clear played notes (debug)
         if (keys & KEY_DDOWN) playingsong = "";
+		
+		// Switch instrument (touch)
+		if (isTouchInRegion(touch, 20, 20+52, 40, 40+39) && !invOpen) {
+			invOpen = true;
+			while (invOpen) {
+                hidScanInput();
+                u32 keys = hidKeysDown();
+
+                if (keys & KEY_B) break; // Close inventory
+
+                sf2d_start_frame(GFX_TOP, GFX_LEFT);
+					sf2d_draw_texture(bgtop, 0, 0);
+                sf2d_end_frame();
+                sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
+                    sf2d_draw_texture(bgbot, 0, 0);
+                    sf2d_draw_texture(inventory, 36, invYPos);
+					if (invYPos == 0) {
+						for (int i = 0; i < INSTRUMENTCOUNT; ++i) {
+							sf2d_draw_texture(iicons[0], 49*(i%5)+42, 48*(i%4)+10);
+							svcSleepThread(1500000000);
+						}
+					}
+                sf2d_end_frame();
+                sf2d_swapbuffers();
+				if (invYPos < 0) invYPos += 10;
+            }
+			invOpen = false;
+			invYPos = -240;
+		}
 
         // Switch instrument (debug)
         if (keys & KEY_LEFT) {

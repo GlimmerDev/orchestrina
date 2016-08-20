@@ -564,8 +564,9 @@ int main(int argc, char* argv[]) {
 			while (invOpen) {
                 hidScanInput();
                 u32 keys = hidKeysDown();
+				hidTouchRead(&touch);
 
-                if (keys & KEY_B) break; // Close inventory
+                if (keys & KEY_B) invOpen = false; // Close inventory
 
                 sf2d_start_frame(GFX_TOP, GFX_LEFT);
 					sf2d_draw_texture(bgtop, 0, 0);
@@ -575,8 +576,15 @@ int main(int argc, char* argv[]) {
                     sf2d_draw_texture(inventory, 36, invYPos);
 					if (invYPos == 0) {
 						for (int i = 0; i < INSTRUMENTCOUNT; ++i) {
-							sf2d_draw_texture(iicons[0], 49*(i%5)+42, 48*(i%4)+10);
-							svcSleepThread(1500000000);
+							int xPos = 48*(i%5)+40;
+							int yPos = 48*((int)(i/5)%4)+5;
+							sf2d_draw_texture(iicons[i], xPos, yPos);
+							if (isTouchInRegion(touch, xPos, xPos+48, yPos, yPos+48)) {
+								currentinstrument = i;
+								instrumentInit(currentinstrument);
+								playingsong = "";
+								invOpen = false;
+							}
 						}
 					}
                 sf2d_end_frame();

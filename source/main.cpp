@@ -7,9 +7,13 @@
 #include <sf2d.h>
 #include <sfil.h>
 #include <sftd.h>
-#include <queue>
+#include <dirent.h>
+#include <algorithm>
 #include <sstream>
 #include <cctype>
+
+#include "certs/cybertrust.h"
+#include "certs/digicert.h"
 
 #define DEFAULTSAMPLERATE 22050
 #define BYTESPERSAMPLE 4
@@ -168,12 +172,106 @@ string intToStr( int num )
     return ss.str();
 }
 
+// Download song from URL
+Result downloadSong(u16 songid) {
+    Result ret = 0;
+    u32 statuscode = 0;
+    u32 contentsize = 0;
+    httpcContext context;
+    string SongName = songs[songid].name;
+    std::replace(SongName.begin(), SongName.end(), ' ', '-');
+    string URL = "https://raw.githubusercontent.com/EBLeifEricson/orchestrina/master/data/Songs/" + SongName + ".pcm";
+
+    ret = httpcOpenContext(&context, HTTPC_METHOD_GET, URL.c_str(), 1);
+    if(R_FAILED(ret))return ret;
+
+    ret = httpcAddRequestHeaderField(&context, "User-Agent", "Orchestrina");
+    if(R_FAILED(ret))
+    {
+        httpcCloseContext(&context);
+        return ret;
+    }
+
+    ret = httpcSetSSLOpt(&context, 1 << 9);
+    if(R_FAILED(ret))
+    {
+        httpcCloseContext(&context);
+        return ret;
+    }
+
+    httpcAddTrustedRootCA(&context, cybertrust_cer, cybertrust_cer_len);
+    httpcAddTrustedRootCA(&context, digicert_cer, digicert_cer_len);
+
+    ret = httpcBeginRequest(&context);
+    if(R_FAILED(ret))
+    {
+        httpcCloseContext(&context);
+        return ret;
+    }
+
+    ret = httpcGetResponseStatusCode(&context, &statuscode);
+    if(R_FAILED(ret))
+    {
+        httpcCloseContext(&context);
+        return ret;
+    }
+
+    if (statuscode != 200) {
+        if (statuscode >= 300 && statuscode < 400) {
+            char newUrl[1024];
+            httpcGetResponseHeader(&context, (char*)"Location", newUrl, 1024);
+            httpcCloseContext(&context);
+            ret = downloadSong(songid);
+            return ret;
+        }
+        return statuscode;
+    }
+
+    ret = httpcGetDownloadSizeState(&context, NULL, &contentsize);
+    if(R_FAILED(ret))
+    {
+        httpcCloseContext(&context);
+        return ret;
+    }
+
+    if(contentsize==0)
+    {
+        httpcCloseContext(&context);
+        return 0xFFFFFFFE;
+    }
+
+    u8* filebuffer = (u8*)malloc(contentsize);
+    if (filebuffer==NULL) return 0xFFFFFFFD;
+
+    ret = httpcDownloadData(&context, filebuffer, contentsize, NULL);
+    if(R_FAILED(ret))
+    {
+        httpcCloseContext(&context);
+        return ret;
+    }
+
+    httpcCloseContext(&context);
+
+    FILE* songfile = fopen(("/3ds/orchestrina/data/songs/" + songs[songid].name + ".pcm").c_str(), "wb");
+    if (songfile==NULL) return 0xFFFFFFFC;
+
+    if (fwrite(filebuffer, 1, contentsize, songfile) < contentsize)
+    {
+        fclose(songfile);
+        return 0xFFFFFFFB;
+    }
+
+    fclose(songfile);
+
+    return 0;
+}
+
 // Detects if a song has been played by the player
 int detectSong(string sequence, u8 instrumentid) {
 
     for (u8 i = 0; i < instruments[instrumentid].songs; i++) {
         u32 pos = sequence.find(songs[instruments[instrumentid].songlist[i]].sequence);
-        if (pos != std::string::npos) return instruments[instrumentid].songlist[i];
+        if (pos != string::npos) return instruments[instrumentid].songlist[i];
     }
 
     return -1;
@@ -290,6 +388,7 @@ int main(int argc, char* argv[]) {
     sf2d_set_3D(0);
 
     // Load fonts & textures
+    // TODO: Download missing songs on startup
     sftd_font    *font  = sftd_load_font_file("romfs:/fonts/chiaro.otf");
     sf2d_texture *bgbot = sfil_load_PNG_file("romfs:/bgbottom.png", SF2D_PLACE_RAM);
 	sf2d_texture *bgtop = sfil_load_PNG_file("romfs:/bgtop.png", SF2D_PLACE_RAM);
@@ -304,6 +403,22 @@ int main(int argc, char* argv[]) {
         sfil_load_PNG_file("romfs:/o_songs.png", SF2D_PLACE_RAM),
         sfil_load_PNG_file("romfs:/o_instruments.png", SF2D_PLACE_RAM)
     };
+
+    // Create data path
+    mkdir("/3ds", 0777);
+    mkdir("/3ds/orchestrina", 0777);
+    mkdir("/3ds/orchestrina/data", 0777);
+    mkdir("/3ds/orchestrina/data/songs", 0777);
+
+    // Number of songs found on the SD card
+    int nsongs = 0;
+
+    // Check if all songs are present and download all the missing ones
+    for (int i = 0; i < SONGCOUNT; i++) {
+        FILE* f = fopen(("/3ds/orchestrina/data/songs/"+songs[i].name+".pcm").c_str(), "rb");
+        if (f!=NULL || songs[i].name=="NULL") nsongs++;
+        fclose(f);
+    }
 
     // Initialize ndsp
     ndspInit();
@@ -351,9 +466,9 @@ int main(int argc, char* argv[]) {
 
     // Index of button being pressed
     u32 pressed = 0xFF;
-	
+
 	// Whether free play is on or not
-	bool freePlay = false;
+	bool freePlay = (nsongs<SONGCOUNT);
 
     // FOR REFERENCE:
     // KEY_L    :   D (0)
@@ -362,6 +477,9 @@ int main(int argc, char* argv[]) {
     // KEY_A    :   D2(3)
     // KEY_R    :   F (4)
     // KEY_B    :   ? (5)
+
+    bool errorflag = false;
+    Result errorcode = 0;
 
     while(aptMainLoop()) {
         hidScanInput();
@@ -372,7 +490,6 @@ int main(int argc, char* argv[]) {
         u32 keyset[MAXNOTES];
         memcpy(keyset, notesets[instruments[currentinstrument].nset].keys, MAXNOTES * sizeof(u32));
 
-        // TODO: use circle pad to change frequence
         for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
             // Play notes on button presses
             if((keys & keyset[i])) {
@@ -386,32 +503,68 @@ int main(int argc, char* argv[]) {
             if ((released & keyset[i]) && pressed==i) pressed = 0xFF;
         }
 
-        // Clear played notes
-        // if (keys & KEY_B) playingsong = "";
-
-        // Switch instrument (debug)
-        if (keys & KEY_SELECT) {
-            currentinstrument++;
-            if (currentinstrument == INSTRUMENTCOUNT) currentinstrument = 0;
-            instrumentInit(currentinstrument);
+        // Change frequence based on circle pad's coordenates
+/*
+        circlePosition pos;
+        hidCircleRead(&pos);
+        if ((pos.dx > 24 || pos.dx < -24) && (pos.dy > 24 || pos.dy < -24)) ndspChnSetRate(0, DEFAULTSAMPLERATE + (pos.dx + pos.dy)*70);
+        else ndspChnSetRate(0, DEFAULTSAMPLERATE);
+*/
+        // Download missing songs
+        // TODO: error handling
+        if ((keys & KEY_SELECT) && (nsongs < SONGCOUNT)) {
+            httpcInit(0);
+            for (int i = 0; i < SONGCOUNT; i++) {
+                FILE* f = fopen(("/3ds/orchestrina/data/songs/"+songs[i].name+".pcm").c_str(), "rb");
+                if (f==NULL && songs[i].name!="NULL") {
+                    string drawstr = "Downloading " + songs[i].name + "...";
+                    sf2d_start_frame(GFX_TOP, GFX_LEFT);
+                        sf2d_draw_texture(bgtop, 0, 0);
+                        sftd_draw_text(font, (400 - drawstr.size()*6)/2, 114, RGBA8(255, 255, 255, 255), 12, drawstr.c_str());
+                    sf2d_end_frame();
+                    sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
+                        sf2d_draw_texture(bgbot, 0, 0);
+                    sf2d_end_frame();
+                    sf2d_swapbuffers();
+                    errorcode = downloadSong(i);
+                    if (errorcode==0) nsongs++;
+                    else errorflag = true;
+                }
+                else fclose(f);
+            }
+            httpcExit();
         }
-		
+
 		// Toggle free play (debug)
-		if (keys & KEY_DUP) {
+		if ((keys & KEY_DUP) && (nsongs==SONGCOUNT)) {
 			freePlay = !freePlay;
 		}
 
-        // Debug
-        // if (keys & KEY_LEFT) submenu = 0;
-        // if (keys & KEY_RIGHT) submenu = 1;
+        // Clear played notes (debug)
+        if (keys & KEY_DDOWN) playingsong = "";
+
+        // Switch instrument (debug)
+        if (keys & KEY_LEFT) {
+            if (currentinstrument == 0) currentinstrument = INSTRUMENTCOUNT - 1;
+            else currentinstrument--;
+            instrumentInit(currentinstrument);
+            playingsong = "";
+        }
+        if (keys & KEY_RIGHT) {
+            currentinstrument++;
+            if (currentinstrument == INSTRUMENTCOUNT) currentinstrument = 0;
+            instrumentInit(currentinstrument);
+            playingsong = "";
+        }
 
         // Start top screen
         sf2d_start_frame(GFX_TOP, GFX_LEFT);
 			sf2d_draw_texture(bgtop, 0, 0);
-            //sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0, 0, 0, 255));
 
             //Debug stuff
-            sftd_draw_text(font, 5, 20, RGBA8(255, 255, 255, 255), 24, upperStr(playingsong).c_str()); // Last 20 notes played
+            if (nsongs < SONGCOUNT) sftd_draw_text(font, 5, 5, RGBA8(255, 255, 255, 255), 12, "WARNING: Some songs are missing.\nYou will be unable to switch out of free play mode.\nPress SELECT to download all missing songs.");
+            if (errorflag) sftd_draw_text(font, 5, 48, RGBA8(255, 255, 255, 255), 12, ("Error while downloading file. "+intToStr(errorcode)).c_str());
+            sftd_draw_text(font, 5, 64, RGBA8(255, 255, 255, 255), 24, upperStr(playingsong).c_str()); // Last 20 notes played
             sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("Instrument (SEL): "+instruments[currentinstrument].name).c_str()); // Current instrument
 			sftd_draw_text(font, 5, 220, RGBA8(255, 255, 255, 255), 12, ("Free Play (D-UP): "+boolToStr(freePlay)).c_str()); // Free Play enabled
 
@@ -511,14 +664,14 @@ int main(int argc, char* argv[]) {
 
                 sf2d_start_frame(GFX_TOP, GFX_LEFT);
 					sf2d_draw_texture(bgtop, 0, 0);
-                    //sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0, 0, 0, 255));
-                    sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("You played "+played+".").c_str()); // Current song playing
+                    sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("You played " + played + ".").c_str());
                 sf2d_end_frame();
                 sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
                     sf2d_draw_texture(bgbot, 0, 0);
                     for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
                         int x = (160 - notesets[instruments[currentinstrument].nset].notes * 14) + (i * 28);
                         sf2d_draw_texture(nicons[i], x, 100);
+                        sf2d_draw_rectangle(x - 4, 100, 32, 24, RGBA8(255, 255, 0, (int)alpha));
                     }
                 sf2d_end_frame();
                 sf2d_swapbuffers();

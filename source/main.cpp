@@ -251,7 +251,7 @@ Result downloadSong(u16 songid) {
 
     httpcCloseContext(&context);
 
-    FILE* songfile = fopen(("/3ds/orchestrina/data/songs/" + songs[i].name + ".pcm").c_str(), "wb");
+    FILE* songfile = fopen(("/3ds/orchestrina/data/songs/" + songs[songid].name + ".pcm").c_str(), "wb");
     if (songfile==NULL) return 0xFFFFFFFC;
 
     if (fwrite(filebuffer, 1, contentsize, songfile) < contentsize)

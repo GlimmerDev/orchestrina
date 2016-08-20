@@ -180,7 +180,7 @@ Result downloadSong(u16 songid) {
     httpcContext context;
     string SongName = songs[songid].name;
     std::replace(SongName.begin(), SongName.end(), ' ', '-');
-    string URL = "https://raw.githubusercontent.com/Ryuzaki-MrL/orchestrina/master/data/Songs/" + SongName + ".pcm";
+    string URL = "https://raw.githubusercontent.com/EBLeifEricson/orchestrina/master/data/Songs/" + SongName + ".pcm";
 
     ret = httpcOpenContext(&context, HTTPC_METHOD_GET, URL.c_str(), 1);
     if(R_FAILED(ret))return ret;

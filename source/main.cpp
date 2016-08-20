@@ -82,7 +82,7 @@ noteset notesets[3] = {
 
 // Array of songs
 song songs[SONGCOUNT] = {
-    { "NULL",                   "------"   }, //  0
+    { "NULL",                   "------"   }, //  0 - OOT/MM
     { "Zelda's Lullaby",        "xayxay"   }, //  1
     { "Saria's Song",           "ryxryx"   }, //  2
     { "Epona's Song",           "axyaxy"   }, //  3
@@ -106,22 +106,23 @@ song songs[SONGCOUNT] = {
     { "Elegy of Emptiness",     "yxyryax"  }, // 21
     { "Song of Frogs",          "lrxya"    }, // 22
     { "NULL",                   "------"   }, // 23
-    { "Song of Awakening",      "ya"       }, // 24
+    { "Song of Awakening",      "ya"       }, // 24 - ST
     { "Song of Healing (ST)",   "lxl"      }, // 25
     { "Song of Discovery",      "aray"     }, // 26
     { "Song of Light",          "brayx"    }, // 27
     { "Song of Birds",          "brb"      }, // 28
     { "NULL",                   "------"   }, // 29
-    { "NULL",                   "------"   }, // 30
+    { "Chai Kingdom",           "yxaxy"    }, // 30 - CUSTOM/HIDDEN
     { "NULL",                   "------"   }  // 31
 };
 
 // Array of instruments
 instrument instruments[INSTRUMENTCOUNT] = {
-    { "Ocarina", NOTESET_OOT, 21,
+    { "Ocarina", NOTESET_OOT, 22,
         {  1,  2,  3,  4,  5,  6,  7,
            8,  9, 10, 11, 12, 13, 14,
-          15, 16, 17, 18, 19, 20, 21 }
+          15, 16, 17, 18, 19, 20, 21, 
+		  30                          }
     },
     { "Pipes", NOTESET_OOT, 2,
         { 18, 21 }
@@ -576,6 +577,11 @@ int main(int argc, char* argv[]) {
             sf2d_draw_texture(bgbot, 0, 0);
 			sftd_draw_text(font, 0, 0, RGBA8(255, 255, 255, 255), 12, "v0.1.0 by Leif Ericson and Ryuzaki_MrL."); 
 			sftd_draw_text(font, 0, 15, RGBA8(255, 255, 255, 255), 12, "Top screen graphic by Sliter."); 
+			
+			sf2d_draw_texture(optionblock, 20, 40); // Instrument select button
+			sf2d_draw_texture(oicons[1], 25, 45); // Instrument select icon
+			
+			
             for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
 
                 int x = (160 - notesets[instruments[currentinstrument].nset].notes * 14) + (i * 28);

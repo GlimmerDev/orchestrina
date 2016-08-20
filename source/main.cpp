@@ -450,7 +450,11 @@ int main(int argc, char* argv[]) {
 
     // Load sound effects
     source* correct = new source;
+    source* menuOpen = new source;
+    source* menuSelect = new source;
     sourceInit(correct, "/3ds/orchestrina/data/Correct.pcm", 1);
+    sourceInit(menuOpen, "/3ds/orchestrina/data/Menu-Open.pcm", 1);
+    sourceInit(menuSelect, "/3ds/orchestrina/data/Menu-Select.pcm", 1);
 
     // Last 20 played notes
     string playingsong = "";
@@ -519,12 +523,12 @@ int main(int argc, char* argv[]) {
         }
 
         // Change frequence based on circle pad's coordenates
-/*
+
         circlePosition pos;
         hidCircleRead(&pos);
         if ((pos.dx > 24 || pos.dx < -24) && (pos.dy > 24 || pos.dy < -24)) ndspChnSetRate(0, DEFAULTSAMPLERATE + (pos.dx + pos.dy)*70);
         else ndspChnSetRate(0, DEFAULTSAMPLERATE);
-*/
+
         // Download missing songs
         // TODO: error handling
         if ((keys & KEY_SELECT) && (nsongs < SONGCOUNT)) {
@@ -560,11 +564,11 @@ int main(int argc, char* argv[]) {
 		
 		// Switch instrument (touch)
 		if (isTouchInRegion(touch, 20, 20+52, 40, 40+39) && !invOpen) {
+			sourcePlay(menuOpen);
 			invOpen = true;
 			while (invOpen) {
                 hidScanInput();
                 u32 keys = hidKeysDown();
-				hidTouchRead(&touch);
 
                 if (keys & KEY_B) invOpen = false; // Close inventory
 
@@ -575,11 +579,13 @@ int main(int argc, char* argv[]) {
                     sf2d_draw_texture(bgbot, 0, 0);
                     sf2d_draw_texture(inventory, 36, invYPos);
 					if (invYPos == 0) {
+						hidTouchRead(&touch);
 						for (int i = 0; i < INSTRUMENTCOUNT; ++i) {
 							int xPos = 48*(i%5)+40;
 							int yPos = 48*((int)(i/5)%4)+5;
 							sf2d_draw_texture(iicons[i], xPos, yPos);
 							if (isTouchInRegion(touch, xPos, xPos+48, yPos, yPos+48)) {
+								sourcePlay(menuSelect);
 								currentinstrument = i;
 								instrumentInit(currentinstrument);
 								playingsong = "";
@@ -592,22 +598,19 @@ int main(int argc, char* argv[]) {
 				if (invYPos < 0) invYPos += 10;
             }
 			invOpen = false;
-			invYPos = -240;
+			// Slide inventory sprite back up
+			while (invYPos > -240) {
+				sf2d_start_frame(GFX_TOP, GFX_LEFT);
+					sf2d_draw_texture(bgtop, 0, 0);
+                sf2d_end_frame();
+                sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
+				    sf2d_draw_texture(bgbot, 0, 0);
+                    sf2d_draw_texture(inventory, 36, invYPos);
+				sf2d_end_frame();
+                sf2d_swapbuffers();
+				invYPos -= 10;
+			}
 		}
-
-        // Switch instrument (debug)
-        if (keys & KEY_LEFT) {
-            if (currentinstrument == 0) currentinstrument = INSTRUMENTCOUNT - 1;
-            else currentinstrument--;
-            instrumentInit(currentinstrument);
-            playingsong = "";
-        }
-        if (keys & KEY_RIGHT) {
-            currentinstrument++;
-            if (currentinstrument == INSTRUMENTCOUNT) currentinstrument = 0;
-            instrumentInit(currentinstrument);
-            playingsong = "";
-        }
 
         // Start top screen
         sf2d_start_frame(GFX_TOP, GFX_LEFT);
@@ -644,48 +647,7 @@ int main(int argc, char* argv[]) {
                 // Red highlights when buttons pressed
                 if (pressed==i) sf2d_draw_rectangle(x, 100, 24, 24, RGBA8(0xFF, 0x00, 0x00, 0x7F));
             }
-/*
-            switch (submenu) {
-                case 0: { // Instrument select
 
-                    for (u32 i = 0; i < 16; i++) {
-
-                        int x = 32 + ((i % 4) * 64);
-                        int y = 8 + (int(i/4) * 56);
-
-                        if (currentinstrument==i) sf2d_draw_texture(itemblock_p, x, y);
-                        else sf2d_draw_texture(itemblock, x, y);
-
-                        if ((i < INSTRUMENTCOUNT) && (iicons[i] != NULL)) sf2d_draw_texture(iicons[i], x + 2, y + 2);
-                    }
-
-                    break;
-                }
-                case 1: { // Song play
-
-                    for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
-
-                        int x = (160 - notesets[instruments[currentinstrument].nset].notes * 14) + (i * 28);
-
-                        // Draw noteset
-                        sf2d_draw_texture(nicons[i], x, 100);
-
-                        // Red highlights when buttons pressed
-                        if (pressed==i) sf2d_draw_rectangle(x, 100, 24, 24, RGBA8(0xFF, 0x00, 0x00, 0x7F));
-                    }
-
-                    sf2d_draw_texture(optionblock, 92, 180);
-                    sf2d_draw_texture(oicons[0], 98, 185);
-                    sf2d_draw_texture(optionblock, 160, 180);
-                    sf2d_draw_texture(oicons[1], 166, 185);
-
-                    break;
-                }
-                case 2: { // Song list
-                    break;
-                }
-            }
-*/
         sf2d_end_frame();
 
         // If song index is valid

@@ -119,10 +119,10 @@ song songs[SONGCOUNT] = {
 // Array of instruments
 instrument instruments[INSTRUMENTCOUNT] = {
     { "Ocarina", NOTESET_OOT, 22,
-        {  1,  2,  3,  4,  5,  6,  7,
-           8,  9, 10, 11, 12, 13, 14,
-          15, 16, 17, 18, 19, 20, 21, 
-		  30                          }
+        {  1,  2,  3,  4,  5,  6,
+           7,  8,  9, 10, 11, 12,
+          13, 14, 15, 16, 17, 18,
+          19, 20, 21, 30          }
     },
     { "Pipes", NOTESET_OOT, 2,
         { 18, 21 }
@@ -179,7 +179,7 @@ Result downloadSong(u16 songid) {
     u32 contentsize = 0;
     httpcContext context;
     string SongName = songs[songid].name;
-    std::replace(SongName.begin(), SongName.end(), ' ', '-');
+    replace(SongName.begin(), SongName.end(), ' ', '-');
     string URL = "https://raw.githubusercontent.com/EBLeifEricson/orchestrina/master/data/Songs/" + SongName + ".pcm";
 
     ret = httpcOpenContext(&context, HTTPC_METHOD_GET, URL.c_str(), 1);
@@ -346,7 +346,7 @@ int instrumentInit(u8 id) {
 
         // Load new instrument's resources
         string ipath = "romfs:/notes/"+intToStr(instruments[id].nset)+"_"+intToStr(i)+".png";
-        string spath = "/3ds/orchestrina/data/notes/"+instruments[id].name+"/"+intToStr(i)+".pcm";
+        string spath = "romfs:/sound/notes/"+instruments[id].name+"/"+intToStr(i)+".pcm";
 
         nicons[i] = sfil_load_PNG_file(ipath.c_str(), SF2D_PLACE_RAM);
         notes[i] = new source;
@@ -452,9 +452,9 @@ int main(int argc, char* argv[]) {
     source* correct = new source;
     source* menuOpen = new source;
     source* menuSelect = new source;
-    sourceInit(correct, "/3ds/orchestrina/data/Correct.pcm", 1);
-    sourceInit(menuOpen, "/3ds/orchestrina/data/Menu-Open.pcm", 1);
-    sourceInit(menuSelect, "/3ds/orchestrina/data/Menu-Select.pcm", 1);
+    sourceInit(correct, "romfs:/sound/Correct.pcm", 1);
+    sourceInit(menuOpen, "romfs:/sound/Menu-Open.pcm", 1);
+    sourceInit(menuSelect, "romfs:/sound/Menu-Select.pcm", 1);
 
     // Last 20 played notes
     string playingsong = "";
@@ -523,7 +523,6 @@ int main(int argc, char* argv[]) {
         }
 
         // Change frequence based on circle pad's coordenates
-
         circlePosition pos;
         hidCircleRead(&pos);
         if ((pos.dx > 24 || pos.dx < -24) && (pos.dy > 24 || pos.dy < -24)) ndspChnSetRate(0, DEFAULTSAMPLERATE + (pos.dx + pos.dy)*70);
@@ -554,8 +553,8 @@ int main(int argc, char* argv[]) {
             httpcExit();
         }
 
-		// Toggle free play (debug)
-		if ((keys & KEY_DUP) && (nsongs==SONGCOUNT)) {
+		// Toggle free play
+		if ((keys & KEY_SELECT) && (nsongs==SONGCOUNT)) {
 			freePlay = !freePlay;
 		}
 
@@ -620,8 +619,8 @@ int main(int argc, char* argv[]) {
             if (nsongs < SONGCOUNT) sftd_draw_text(font, 5, 5, RGBA8(255, 255, 255, 255), 12, "WARNING: Some songs are missing.\nYou will be unable to switch out of free play mode.\nPress SELECT to download all missing songs.");
             if (errorflag) sftd_draw_text(font, 5, 48, RGBA8(255, 255, 255, 255), 12, ("Error while downloading file. "+intToStr(errorcode)).c_str());
             sftd_draw_text(font, 5, 64, RGBA8(255, 255, 255, 255), 24, upperStr(playingsong).c_str()); // Last 20 notes played
-            sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("Instrument (SEL): "+instruments[currentinstrument].name).c_str()); // Current instrument
-			sftd_draw_text(font, 5, 220, RGBA8(255, 255, 255, 255), 12, ("Free Play (D-UP): "+boolToStr(freePlay)).c_str()); // Free Play enabled
+            sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("Instrument: "+instruments[currentinstrument].name).c_str()); // Current instrument
+			sftd_draw_text(font, 5, 220, RGBA8(255, 255, 255, 255), 12, ("Free Play (SEL): "+boolToStr(freePlay)).c_str()); // Free Play enabled
 
         sf2d_end_frame();
 
@@ -630,13 +629,12 @@ int main(int argc, char* argv[]) {
         sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
 
             sf2d_draw_texture(bgbot, 0, 0);
-			sftd_draw_text(font, 0, 0, RGBA8(255, 255, 255, 255), 12, "v0.1.0 by Leif Ericson and Ryuzaki_MrL."); 
+			sftd_draw_text(font, 0, 0, RGBA8(255, 255, 255, 255), 12, "v0.3.0 by Leif Ericson and Ryuzaki_MrL."); 
 			sftd_draw_text(font, 0, 15, RGBA8(255, 255, 255, 255), 12, "Top screen graphic by Sliter."); 
-			
+
 			sf2d_draw_texture(optionblock, 20, 40); // Instrument select button
 			sf2d_draw_texture(oicons[1], 25, 45); // Instrument select icon
-			
-			
+
             for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
 
                 int x = (160 - notesets[instruments[currentinstrument].nset].notes * 14) + (i * 28);
@@ -682,11 +680,11 @@ int main(int argc, char* argv[]) {
                 sf2d_end_frame();
                 sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
                     sf2d_draw_texture(bgbot, 0, 0);
+                    int x = (160 - notesets[instruments[currentinstrument].nset].notes * 14);
                     for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
-                        int x = (160 - notesets[instruments[currentinstrument].nset].notes * 14) + (i * 28);
-                        sf2d_draw_texture(nicons[i], x, 100);
-                        sf2d_draw_rectangle(x - 4, 100, 32, 24, RGBA8(255, 255, 0, (int)alpha));
+                        sf2d_draw_texture(nicons[i], x + (i * 28), 100);
                     }
+                    sf2d_draw_rectangle(x - 2, 100, notesets[instruments[currentinstrument].nset].notes * 28, 24, RGBA8(255, 255, 0, (int)alpha));
                 sf2d_end_frame();
                 sf2d_swapbuffers();
 
@@ -718,15 +716,19 @@ int main(int argc, char* argv[]) {
     // Free stuff
     sftd_free_font(font);
     sf2d_free_texture(bgbot);
+    sf2d_free_texture(bgtop);
     sf2d_free_texture(itemblock);
     sf2d_free_texture(itemblock_p);
     sf2d_free_texture(optionblock);
     sf2d_free_texture(oicons[0]);
     sf2d_free_texture(oicons[1]);
+    sf2d_free_texture(inventory);
     for (u32 i = 0; i < INSTRUMENTCOUNT; i++) sf2d_free_texture(iicons[i]);
 
     instrumentFree(currentinstrument);
     sourceFree(correct);
+    sourceFree(menuOpen);
+    sourceFree(menuSelect);
 
     // Exit services
     romfsExit();

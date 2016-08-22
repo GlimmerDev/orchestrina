@@ -12,9 +12,6 @@
 #include <sstream>
 #include <cctype>
 
-#include "certs/cybertrust.h"
-#include "certs/digicert.h"
-
 #define DEFAULTSAMPLERATE 22050
 #define BYTESPERSAMPLE 4
 
@@ -192,15 +189,12 @@ Result downloadSong(u16 songid) {
         return ret;
     }
 
-    ret = httpcSetSSLOpt(&context, 1 << 9);
+    ret = httpcSetSSLOpt(&context, SSLCOPT_DisableVerify);
     if(R_FAILED(ret))
     {
         httpcCloseContext(&context);
         return ret;
     }
-
-    httpcAddTrustedRootCA(&context, cybertrust_cer, cybertrust_cer_len);
-    httpcAddTrustedRootCA(&context, digicert_cer, digicert_cer_len);
 
     ret = httpcBeginRequest(&context);
     if(R_FAILED(ret))

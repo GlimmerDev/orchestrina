@@ -387,7 +387,6 @@ int main(int argc, char* argv[]) {
     sf2d_set_3D(0);
 
     // Load fonts & textures
-    // TODO: Download missing songs on startup
     sftd_font    *font  = sftd_load_font_file("romfs:/fonts/chiaro.otf");
     sf2d_texture *bgbot = sfil_load_PNG_file("romfs:/bgbottom.png", SF2D_PLACE_RAM);
 	sf2d_texture *bgtop = sfil_load_PNG_file("romfs:/bgtop.png", SF2D_PLACE_RAM);
@@ -516,14 +515,13 @@ int main(int argc, char* argv[]) {
             if ((released & keyset[i]) && pressed==i) pressed = 0xFF;
         }
 
-        // Change frequence based on circle pad's coordenates
+        // Change frequence based on circle pad's coordinates
         circlePosition pos;
         hidCircleRead(&pos);
-        if ((pos.dx > 24 || pos.dx < -24) && (pos.dy > 24 || pos.dy < -24)) ndspChnSetRate(0, DEFAULTSAMPLERATE + (pos.dx + pos.dy)*70);
+        if (pos.dy > 20 || pos.dy < -20) ndspChnSetRate(0, DEFAULTSAMPLERATE + 74*pos.dy);
         else ndspChnSetRate(0, DEFAULTSAMPLERATE);
 
         // Download missing songs
-        // TODO: error handling
         if ((keys & KEY_SELECT) && (nsongs < SONGCOUNT)) {
             httpcInit(0);
             for (int i = 0; i < SONGCOUNT; i++) {
@@ -541,8 +539,7 @@ int main(int argc, char* argv[]) {
                     errorcode = downloadSong(i);
                     if (errorcode==0) nsongs++;
                     else errorflag = true;
-                }
-                else fclose(f);
+                } else fclose(f);
             }
             httpcExit();
         }
@@ -559,7 +556,7 @@ int main(int argc, char* argv[]) {
 		if (isTouchInRegion(touch, 20, 20+52, 40, 40+39) && !invOpen) {
 			sourcePlay(menuOpen);
 			invOpen = true;
-			while (invOpen) {
+			while (invOpen && aptMainLoop()) {
                 hidScanInput();
                 u32 keys = hidKeysDown();
 
@@ -619,7 +616,7 @@ int main(int argc, char* argv[]) {
         sf2d_end_frame();
 
         // Start bottom screen
-        // TODO: instruments submenu and songs submenu
+        // TODO: songs submenu
         sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
 
             sf2d_draw_texture(bgbot, 0, 0);

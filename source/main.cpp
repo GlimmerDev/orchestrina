@@ -15,8 +15,8 @@
 #define DEFAULTSAMPLERATE 22050
 #define BYTESPERSAMPLE 4
 
-#define INSTRUMENTCOUNT 9
-#define SONGCOUNT 32
+#define INSTRUMENTCOUNT 10
+#define SONGCOUNT 38
 
 #define MAXNOTES 8
 #define MAXSONGSPERINSTRUMENT 24
@@ -40,6 +40,7 @@ enum {
 
 typedef struct {
     u8 notes;
+    string notestr;
     u32 keys[MAXNOTES];
 } noteset;
 
@@ -72,9 +73,9 @@ sf2d_texture* nicons[MAXNOTES];
 
 // Array of notesets
 noteset notesets[3] = {
-    { 5, { KEY_L, KEY_X, KEY_Y, KEY_A, KEY_R } },
-    { 6, { KEY_L, KEY_X, KEY_Y, KEY_A, KEY_R, KEY_B } },
-    { 5, { KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_A } }
+    { 5, "lxyar",  { KEY_L, KEY_X, KEY_Y, KEY_A, KEY_R } },
+    { 6, "lxyarb", { KEY_L, KEY_X, KEY_Y, KEY_A, KEY_R, KEY_B } },
+    { 5, "rulda",  { KEY_RIGHT, KEY_UP, KEY_LEFT, KEY_DOWN, KEY_A } }
 };
 
 // Array of songs
@@ -102,15 +103,21 @@ song songs[SONGCOUNT] = {
     { "New Wave Bossa Nova",    "xaxyrxy"  }, // 20
     { "Elegy of Emptiness",     "yxyryax"  }, // 21
     { "Song of Frogs",          "lrxya"    }, // 22
-    { "NULL",                   "------"   }, // 23
-    { "Song of Awakening",      "ya"       }, // 24 - ST
+    { "NULL",                   "------"   }, // 23 - ST
+    { "Song of Awakening",      "ya"       }, // 24
     { "Song of Healing (ST)",   "lxl"      }, // 25
     { "Song of Discovery",      "aray"     }, // 26
     { "Song of Light",          "brayx"    }, // 27
     { "Song of Birds",          "brb"      }, // 28
-    { "NULL",                   "------"   }, // 29
-    { "Chai Kingdom",           "yxaxy"    }, // 30 - CUSTOM/HIDDEN
-    { "NULL",                   "------"   }  // 31
+    { "NULL",                   "------"   }, // 29 - CUSTOM/HIDDEN
+    { "Chai Kingdom",           "yxaxy"    }, // 30
+    { "NULL",                   "------"   }, // 31 - WW
+    { "Wind's Requiem",         "ulr"      }, // 32
+    { "Ballad of Gales",        "drlu"     }, // 33
+    { "Command Melody",         "lara"     }, // 34
+    { "Earth God's Lyric",      "ddarla"   }, // 35
+    { "Wind God's Aria",        "uudrlr"   }, // 36
+    { "Song of Passing",        "rld"      }  // 37
 };
 
 // Array of instruments
@@ -144,6 +151,9 @@ instrument instruments[INSTRUMENTCOUNT] = {
     },
     { "Spirit Flute", NOTESET_ST, 5,
         { 24, 25, 26, 27, 28 }
+    },
+    { "Wind Waker", NOTESET_WW, 6,
+        { 32, 33, 34, 35, 36, 37 }
     }
 };
 
@@ -156,14 +166,13 @@ string upperStr(string in) {
 }
 
 // Converts boolean value to string
-string boolToStr( bool in ) {
+string boolToStr(bool in) {
     if (in == true) return "True";
     else return "False";
 }
 
 // Converts integer value to string
-string intToStr( int num )
-{
+string intToStr(int num) {
     stringstream ss;
     ss << num;
     return ss.str();
@@ -183,29 +192,25 @@ Result downloadSong(u16 songid) {
     if(R_FAILED(ret))return ret;
 
     ret = httpcAddRequestHeaderField(&context, "User-Agent", "Orchestrina");
-    if(R_FAILED(ret))
-    {
+    if(R_FAILED(ret)) {
         httpcCloseContext(&context);
         return ret;
     }
 
     ret = httpcSetSSLOpt(&context, SSLCOPT_DisableVerify);
-    if(R_FAILED(ret))
-    {
+    if(R_FAILED(ret)) {
         httpcCloseContext(&context);
         return ret;
     }
 
     ret = httpcBeginRequest(&context);
-    if(R_FAILED(ret))
-    {
+    if(R_FAILED(ret)) {
         httpcCloseContext(&context);
         return ret;
     }
 
     ret = httpcGetResponseStatusCode(&context, &statuscode, 0);
-    if(R_FAILED(ret))
-    {
+    if(R_FAILED(ret)) {
         httpcCloseContext(&context);
         return ret;
     }
@@ -222,14 +227,12 @@ Result downloadSong(u16 songid) {
     }
 
     ret = httpcGetDownloadSizeState(&context, NULL, &contentsize);
-    if(R_FAILED(ret))
-    {
+    if(R_FAILED(ret)) {
         httpcCloseContext(&context);
         return ret;
     }
 
-    if(contentsize==0)
-    {
+    if(contentsize==0) {
         httpcCloseContext(&context);
         return 0xFFFFFFFE;
     }
@@ -238,8 +241,7 @@ Result downloadSong(u16 songid) {
     if (filebuffer==NULL) return 0xFFFFFFFD;
 
     ret = httpcDownloadData(&context, filebuffer, contentsize, NULL);
-    if(R_FAILED(ret))
-    {
+    if(R_FAILED(ret)) {
         httpcCloseContext(&context);
         return ret;
     }
@@ -249,8 +251,7 @@ Result downloadSong(u16 songid) {
     FILE* songfile = fopen(("/3ds/orchestrina/data/songs/" + songs[songid].name + ".pcm").c_str(), "wb");
     if (songfile==NULL) return 0xFFFFFFFC;
 
-    if (fwrite(filebuffer, 1, contentsize, songfile) < contentsize)
-    {
+    if (fwrite(filebuffer, 1, contentsize, songfile) < contentsize) {
         fclose(songfile);
         return 0xFFFFFFFB;
     }
@@ -390,17 +391,11 @@ int main(int argc, char* argv[]) {
     sftd_font    *font  = sftd_load_font_file("romfs:/fonts/chiaro.otf");
     sf2d_texture *bgbot = sfil_load_PNG_file("romfs:/bgbottom.png", SF2D_PLACE_RAM);
 	sf2d_texture *bgtop = sfil_load_PNG_file("romfs:/bgtop.png", SF2D_PLACE_RAM);
-    sf2d_texture *itemblock = sfil_load_PNG_file("romfs:/itemblock.png", SF2D_PLACE_RAM);
-    sf2d_texture *itemblock_p = sfil_load_PNG_file("romfs:/itemblock_pressed.png", SF2D_PLACE_RAM);
     sf2d_texture *iicons[INSTRUMENTCOUNT];
-    for (u32 i = 0; i < INSTRUMENTCOUNT; i++) {
-        iicons[i] = sfil_load_PNG_file(("romfs:/instruments/"+instruments[i].name+".png").c_str(), SF2D_PLACE_RAM);
-    }
+    for (u32 i = 0; i < INSTRUMENTCOUNT; i++) iicons[i] = sfil_load_PNG_file(("romfs:/instruments/"+instruments[i].name+".png").c_str(), SF2D_PLACE_RAM);
     sf2d_texture *optionblock = sfil_load_PNG_file("romfs:/optionblock.png", SF2D_PLACE_RAM);
-    sf2d_texture *oicons[2] = {
-        sfil_load_PNG_file("romfs:/o_songs.png", SF2D_PLACE_RAM),
-        sfil_load_PNG_file("romfs:/o_instruments.png", SF2D_PLACE_RAM)
-    };
+    sf2d_texture *oinsts = sfil_load_PNG_file("romfs:/o_instruments.png", SF2D_PLACE_RAM);
+    sf2d_texture *osongs = sfil_load_PNG_file("romfs:/o_songs.png", SF2D_PLACE_RAM);
 	sf2d_texture *inventory = sfil_load_PNG_file("romfs:/inventory.png", SF2D_PLACE_RAM);
 
     // Create data path
@@ -452,12 +447,6 @@ int main(int argc, char* argv[]) {
     // Last 20 played notes
     string playingsong = "";
 
-    // Possible chars
-    string notestr = "lxyarb";
-
-    // Index of current submenu
-    // u8 submenu = 0;
-
     // Index of current selected instrument
     u8 currentinstrument = 0;
 
@@ -472,14 +461,6 @@ int main(int argc, char* argv[]) {
 
 	// Whether free play is on or not
 	bool freePlay = (nsongs<SONGCOUNT);
-
-    // FOR REFERENCE:
-    // KEY_L    :   D (0)
-    // KEY_X    :   B (1)
-    // KEY_Y    :   A (2)
-    // KEY_A    :   D2(3)
-    // KEY_R    :   F (4)
-    // KEY_B    :   ? (5)
 
     bool errorflag = false;
     Result errorcode = 0;
@@ -508,7 +489,7 @@ int main(int argc, char* argv[]) {
                 if (pressed != i) ndspChnWaveBufClear(0);
                 pressed = i;
                 sourcePlay(notes[i]);
-                playingsong.push_back(notestr.at(i));
+                playingsong.push_back(notesets[instruments[currentinstrument].nset].notestr.at(i));
             }
 
             // Check for releases
@@ -530,7 +511,7 @@ int main(int argc, char* argv[]) {
                     string drawstr = "Downloading " + songs[i].name + "...";
                     sf2d_start_frame(GFX_TOP, GFX_LEFT);
                         sf2d_draw_texture(bgtop, 0, 0);
-                        sftd_draw_text(font, (400 - drawstr.size()*6)/2, 114, RGBA8(255, 255, 255, 255), 12, drawstr.c_str());
+                        sftd_draw_text(font, (400 - drawstr.size()*6)/2, 114, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, drawstr.c_str());
                     sf2d_end_frame();
                     sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
                         sf2d_draw_texture(bgbot, 0, 0);
@@ -546,12 +527,11 @@ int main(int argc, char* argv[]) {
 
 		// Toggle free play
 		if ((keys & KEY_SELECT) && (nsongs==SONGCOUNT)) {
-			freePlay = !freePlay;
-		}
+            freePlay ^= true;
+            playingsong = "";
+            songtrigger = -1;
+        }
 
-        // Clear played notes (debug)
-        if (keys & KEY_DDOWN) playingsong = "";
-		
 		// Switch instrument (touch)
 		if (isTouchInRegion(touch, 20, 20+52, 40, 40+39) && !invOpen) {
 			sourcePlay(menuOpen);
@@ -564,6 +544,7 @@ int main(int argc, char* argv[]) {
 
                 sf2d_start_frame(GFX_TOP, GFX_LEFT);
 					sf2d_draw_texture(bgtop, 0, 0);
+                    sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0x00, 0x00, 0x00, 0x7F));
                 sf2d_end_frame();
                 sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
                     sf2d_draw_texture(bgbot, 0, 0);
@@ -602,29 +583,64 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
+        // Show song list
+        if (isTouchInRegion(touch, 248, 248+52, 40, 40+39) && !invOpen) {
+            sourcePlay(menuOpen);
+			invOpen = true;
+            int cursor = 0;
+			while (invOpen && aptMainLoop()) {
+                hidScanInput();
+                u32 keys = hidKeysDown();
+
+                if (keys & KEY_B) invOpen = false; // Close inventory
+                
+                if (keys & KEY_DOWN) {
+                    if (cursor < SONGCOUNT - 15) cursor++;
+                }
+                if (keys & KEY_UP) {
+                    if (cursor > 0) cursor--;
+                }
+
+                sf2d_start_frame(GFX_TOP, GFX_LEFT);
+					sf2d_draw_texture(bgtop, 0, 0);
+                    sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0x00, 0x00, 0x00, 0x7F));
+                sf2d_end_frame();
+                sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
+                    sf2d_draw_texture(bgbot, 0, 0);
+                    for (int i = 0; i < 15; i++) {
+                        sftd_draw_text(font, 0, i*16, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, (intToStr(cursor+i)+". "+songs[cursor+i].name).c_str());
+                        sftd_draw_text(font, 240, i*16, RGBA8(0x00, 0xC0, 0x00, 0xFF), 12, songs[cursor+i].sequence.c_str());
+                    }
+                sf2d_end_frame();
+                sf2d_swapbuffers();
+            }
+        }
+
         // Start top screen
         sf2d_start_frame(GFX_TOP, GFX_LEFT);
 			sf2d_draw_texture(bgtop, 0, 0);
 
             //Debug stuff
-            if (nsongs < SONGCOUNT) sftd_draw_text(font, 5, 5, RGBA8(255, 255, 255, 255), 12, "WARNING: Some songs are missing.\nYou will be unable to switch out of free play mode.\nPress SELECT to download all missing songs.");
-            if (errorflag) sftd_draw_text(font, 5, 48, RGBA8(255, 255, 255, 255), 12, ("Error while downloading file. "+intToStr(errorcode)).c_str());
-            sftd_draw_text(font, 5, 64, RGBA8(255, 255, 255, 255), 24, upperStr(playingsong).c_str()); // Last 20 notes played
-            sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("Instrument: "+instruments[currentinstrument].name).c_str()); // Current instrument
-			sftd_draw_text(font, 5, 220, RGBA8(255, 255, 255, 255), 12, ("Free Play (SEL): "+boolToStr(freePlay)).c_str()); // Free Play enabled
+            if (nsongs < SONGCOUNT) sftd_draw_text(font, 5, 5, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "WARNING: Some songs are missing.\nYou will be unable to switch out of free play mode.\nPress SELECT to download all missing songs.");
+            if (errorflag) sftd_draw_text(font, 5, 48, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("Error while downloading file. "+intToStr(errorcode)).c_str());
+            sftd_draw_text(font, 5, 64, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 24, upperStr(playingsong).c_str()); // Note history
+            sftd_draw_text(font, 5, 205, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("Instrument: "+instruments[currentinstrument].name).c_str()); // Current instrument
+			sftd_draw_text(font, 5, 220, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("Free Play (SEL): "+boolToStr(freePlay)).c_str()); // Free Play status
 
         sf2d_end_frame();
 
         // Start bottom screen
-        // TODO: songs submenu
         sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
 
             sf2d_draw_texture(bgbot, 0, 0);
-			sftd_draw_text(font, 0, 0, RGBA8(255, 255, 255, 255), 12, "v0.3.0 by Leif Ericson and Ryuzaki_MrL."); 
-			sftd_draw_text(font, 0, 15, RGBA8(255, 255, 255, 255), 12, "Top screen graphic by Sliter."); 
+			sftd_draw_text(font, 0, 0, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "v0.4.0 by Leif Ericson and Ryuzaki_MrL.");
+			sftd_draw_text(font, 0, 15, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "Top screen graphic by Sliter.");
 
 			sf2d_draw_texture(optionblock, 20, 40); // Instrument select button
-			sf2d_draw_texture(oicons[1], 25, 45); // Instrument select icon
+			sf2d_draw_texture(oinsts, 25, 45); // Instrument select icon
+
+            sf2d_draw_texture(optionblock, 248, 40); // Song select button
+			sf2d_draw_texture(osongs, 253, 45); // Song select icon
 
             for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
 
@@ -667,15 +683,13 @@ int main(int argc, char* argv[]) {
 
                 sf2d_start_frame(GFX_TOP, GFX_LEFT);
 					sf2d_draw_texture(bgtop, 0, 0);
-                    sftd_draw_text(font, 5, 205, RGBA8(255, 255, 255, 255), 12, ("You played " + played + ".").c_str());
+                    sftd_draw_text(font, 5, 205, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("You played " + played + ".").c_str());
                 sf2d_end_frame();
                 sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
                     sf2d_draw_texture(bgbot, 0, 0);
                     int x = (160 - notesets[instruments[currentinstrument].nset].notes * 14);
-                    for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
-                        sf2d_draw_texture(nicons[i], x + (i * 28), 100);
-                    }
-                    sf2d_draw_rectangle(x - 2, 100, notesets[instruments[currentinstrument].nset].notes * 28, 24, RGBA8(255, 255, 0, (int)alpha));
+                    for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) sf2d_draw_texture(nicons[i], x + (i * 28), 100);
+                    sf2d_draw_rectangle(x - 2, 100, notesets[instruments[currentinstrument].nset].notes * 28, 24, RGBA8(0xFF, 0xFF, 0x00, (int)alpha));
                 sf2d_end_frame();
                 sf2d_swapbuffers();
 
@@ -698,7 +712,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Exit on Start
-        if(keys & KEY_START) break;
+        if (keys & KEY_START) break;
 
         // Swap buffers
         sf2d_swapbuffers();
@@ -708,11 +722,9 @@ int main(int argc, char* argv[]) {
     sftd_free_font(font);
     sf2d_free_texture(bgbot);
     sf2d_free_texture(bgtop);
-    sf2d_free_texture(itemblock);
-    sf2d_free_texture(itemblock_p);
     sf2d_free_texture(optionblock);
-    sf2d_free_texture(oicons[0]);
-    sf2d_free_texture(oicons[1]);
+    sf2d_free_texture(oinsts);
+    sf2d_free_texture(osongs);
     sf2d_free_texture(inventory);
     for (u32 i = 0; i < INSTRUMENTCOUNT; i++) sf2d_free_texture(iicons[i]);
 

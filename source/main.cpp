@@ -328,6 +328,7 @@ void sourceFree(source *self) {
     if (self==NULL) return;
     wavebufList[self->wbuf] = false;
     if (waveBuf[self->wbuf].status == NDSP_WBUF_PLAYING || waveBuf[self->wbuf].status==NDSP_WBUF_QUEUED) ndspChnWaveBufClear(self->channel);
+    linearFree(self->data);
     delete self;
 }
 
@@ -407,7 +408,7 @@ int main(int argc, char* argv[]) {
     // Number of songs found on the SD card
     int nsongs = 0;
 
-    // Check if all songs are present and download all the missing ones
+    // Check if all songs are present
     for (int i = 0; i < SONGCOUNT; i++) {
         FILE* f = fopen(("/3ds/orchestrina/data/songs/"+songs[i].name+".pcm").c_str(), "rb");
         if (f!=NULL || songs[i].name=="NULL") nsongs++;
@@ -471,14 +472,15 @@ int main(int argc, char* argv[]) {
 	bool invOpen = false;
 	
 	touchPosition touch;
+    circlePosition pos;
 
     while(aptMainLoop()) {
         hidScanInput();
 
         u32 keys = hidKeysDown();
         u32 released = hidKeysUp();
-		
-		hidTouchRead(&touch);
+        hidTouchRead(&touch);
+        hidCircleRead(&pos);
 
         u32 keyset[MAXNOTES];
         memcpy(keyset, notesets[instruments[currentinstrument].nset].keys, MAXNOTES * sizeof(u32));
@@ -497,8 +499,6 @@ int main(int argc, char* argv[]) {
         }
 
         // Change frequence based on circle pad's coordinates
-        circlePosition pos;
-        hidCircleRead(&pos);
         if (pos.dy > 20 || pos.dy < -20) ndspChnSetRate(0, DEFAULTSAMPLERATE + 74*pos.dy);
         else ndspChnSetRate(0, DEFAULTSAMPLERATE);
 
@@ -532,8 +532,43 @@ int main(int argc, char* argv[]) {
             songtrigger = -1;
         }
 
+        // Show song list
+        if (isTouchInRegion(touch, 248, 248+52, 40, 40+39) && !invOpen) {
+            ndspChnWaveBufClear(1);
+            sourcePlay(menuOpen);
+			invOpen = true;
+            int cursor = 0;
+			while (invOpen && aptMainLoop()) {
+                hidScanInput();
+                u32 keys = hidKeysDown();
+
+                if (keys & KEY_B) invOpen = false; // Close inventory
+                
+                if (keys & KEY_DOWN) {
+                    if (cursor < SONGCOUNT - 15) cursor++;
+                }
+                if (keys & KEY_UP) {
+                    if (cursor > 0) cursor--;
+                }
+
+                sf2d_start_frame(GFX_TOP, GFX_LEFT);
+					sf2d_draw_texture(bgtop, 0, 0);
+                    sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0x00, 0x00, 0x00, 0x7F));
+                sf2d_end_frame();
+                sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
+                    sf2d_draw_texture(bgbot, 0, 0);
+                    for (int i = 0; i < 15; i++) {
+                        sftd_draw_text(font, 0, i*16, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, (intToStr(cursor+i)+". "+songs[cursor+i].name).c_str());
+                        sftd_draw_text(font, 256, i*16, RGBA8(0x00, 0xC0, 0x00, 0xFF), 12, songs[cursor+i].sequence.c_str());
+                    }
+                sf2d_end_frame();
+                sf2d_swapbuffers();
+            }
+        }
+
 		// Switch instrument (touch)
 		if (isTouchInRegion(touch, 20, 20+52, 40, 40+39) && !invOpen) {
+            ndspChnWaveBufClear(1);
 			sourcePlay(menuOpen);
 			invOpen = true;
 			while (invOpen && aptMainLoop()) {
@@ -583,39 +618,6 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-        // Show song list
-        if (isTouchInRegion(touch, 248, 248+52, 40, 40+39) && !invOpen) {
-            sourcePlay(menuOpen);
-			invOpen = true;
-            int cursor = 0;
-			while (invOpen && aptMainLoop()) {
-                hidScanInput();
-                u32 keys = hidKeysDown();
-
-                if (keys & KEY_B) invOpen = false; // Close inventory
-                
-                if (keys & KEY_DOWN) {
-                    if (cursor < SONGCOUNT - 15) cursor++;
-                }
-                if (keys & KEY_UP) {
-                    if (cursor > 0) cursor--;
-                }
-
-                sf2d_start_frame(GFX_TOP, GFX_LEFT);
-					sf2d_draw_texture(bgtop, 0, 0);
-                    sf2d_draw_rectangle(0, 0, 400, 240, RGBA8(0x00, 0x00, 0x00, 0x7F));
-                sf2d_end_frame();
-                sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
-                    sf2d_draw_texture(bgbot, 0, 0);
-                    for (int i = 0; i < 15; i++) {
-                        sftd_draw_text(font, 0, i*16, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, (intToStr(cursor+i)+". "+songs[cursor+i].name).c_str());
-                        sftd_draw_text(font, 240, i*16, RGBA8(0x00, 0xC0, 0x00, 0xFF), 12, songs[cursor+i].sequence.c_str());
-                    }
-                sf2d_end_frame();
-                sf2d_swapbuffers();
-            }
-        }
-
         // Start top screen
         sf2d_start_frame(GFX_TOP, GFX_LEFT);
 			sf2d_draw_texture(bgtop, 0, 0);
@@ -633,7 +635,7 @@ int main(int argc, char* argv[]) {
         sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
 
             sf2d_draw_texture(bgbot, 0, 0);
-			sftd_draw_text(font, 0, 0, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "v0.4.0 by Leif Ericson and Ryuzaki_MrL.");
+			sftd_draw_text(font, 0, 0, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "v0.4.1 by Leif Ericson and Ryuzaki_MrL.");
 			sftd_draw_text(font, 0, 15, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "Top screen graphic by Sliter.");
 
 			sf2d_draw_texture(optionblock, 20, 40); // Instrument select button

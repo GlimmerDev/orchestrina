@@ -24,6 +24,17 @@
 #define WAVEBUFCOUNT (MAXNOTES+4)
 #define SONGWAVEBUF (WAVEBUFCOUNT-1)
 
+#define INST_OCARINA 0
+#define INST_PIPES 1
+#define INST_DRUMS 2
+#define INST_GUITAR 3
+#define INST_MALON 4
+#define INST_HARP 5
+#define INST_FROGS 6
+#define INST_MUSBOX 7
+#define INST_FLUTE 8
+#define INST_WAKER 9
+
 using namespace std;
 
 // One wavebuf for each of the current instrument's notes, one for each sound effect, one for the current full song playing
@@ -75,7 +86,7 @@ sf2d_texture* nicons[MAXNOTES];
 noteset notesets[3] = {
     { 5, "lxyar",  { KEY_L, KEY_X, KEY_Y, KEY_A, KEY_R } },
     { 6, "lxyarb", { KEY_L, KEY_X, KEY_Y, KEY_A, KEY_R, KEY_B } },
-    { 5, "rulda",  { KEY_RIGHT, KEY_UP, KEY_LEFT, KEY_DOWN, KEY_A } }
+    { 5, "ruldn",  { KEY_A, KEY_X, KEY_Y, KEY_B, 0 } }
 };
 
 // Array of songs
@@ -114,8 +125,8 @@ song songs[SONGCOUNT] = {
     { "NULL",                   "------"   }, // 31 - WW
     { "Wind's Requiem",         "ulr"      }, // 32
     { "Ballad of Gales",        "drlu"     }, // 33
-    { "Command Melody",         "lara"     }, // 34
-    { "Earth God's Lyric",      "ddarla"   }, // 35
+    { "Command Melody",         "lnrn"     }, // 34
+    { "Earth God's Lyric",      "ddarln"   }, // 35
     { "Wind God's Aria",        "uudrlr"   }, // 36
     { "Song of Passing",        "rld"      }  // 37
 };
@@ -209,7 +220,7 @@ Result downloadSong(u16 songid) {
         return ret;
     }
 
-    ret = httpcGetResponseStatusCode(&context, &statuscode, 0);
+    ret = httpcGetResponseStatusCode(&context, &statuscode);
     if(R_FAILED(ret)) {
         httpcCloseContext(&context);
         return ret;
@@ -473,34 +484,90 @@ int main(int argc, char* argv[]) {
 	
 	touchPosition touch;
     circlePosition pos;
+	
+	
+	int wakertimer = 4;
+	bool wakertimerdir = false;
+	int rhythm = 3;
+	int separation = 0;
 
     while(aptMainLoop()) {
         hidScanInput();
 
         u32 keys = hidKeysDown();
         u32 released = hidKeysUp();
+		u32 held = hidKeysHeld();
         hidTouchRead(&touch);
         hidCircleRead(&pos);
 
         u32 keyset[MAXNOTES];
         memcpy(keyset, notesets[instruments[currentinstrument].nset].keys, MAXNOTES * sizeof(u32));
 
-        for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
-            // Play notes on button presses
-            if((keys & keyset[i])) {
-                if (pressed != i) ndspChnWaveBufClear(0);
-                pressed = i;
-                sourcePlay(notes[i]);
-                playingsong.push_back(notesets[instruments[currentinstrument].nset].notestr.at(i));
-            }
-
-            // Check for releases
-            if ((released & keyset[i]) && pressed==i) pressed = 0xFF;
-        }
+		// Play note on button press (or on rythym for wind waker)
+		if ((currentinstrument != INST_WAKER) || (wakertimer == 0)) {
+			int songLen = playingsong.size();
+			for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
+				if ((currentinstrument == INST_WAKER) && (held & keyset[i])) {
+					ndspChnWaveBufClear(0);
+					pressed = i;
+					sourcePlay(notes[i]);
+					playingsong.push_back(notesets[instruments[currentinstrument].nset].notestr.at(i));
+					break;
+				}
+				else if((currentinstrument != INST_WAKER) && (keys & keyset[i])) {
+					if (pressed != i) ndspChnWaveBufClear(0);
+					pressed = i;
+					sourcePlay(notes[i]);
+					playingsong.push_back(notesets[instruments[currentinstrument].nset].notestr.at(i));
+				}
+				// Check for releases
+				if ((released & keyset[i]) && pressed==i) pressed = 0xFF;
+				if ((released & keyset[i]) && held==i) held = 0xFF;
+			}
+			if ((playingsong.size() == songLen) && (currentinstrument == INST_WAKER)) {
+				if ((playingsong.length() < rhythm) || freePlay) {
+					ndspChnWaveBufClear(0);
+					sourcePlay(notes[4]);
+				}
+				playingsong.push_back(notesets[instruments[currentinstrument].nset].notestr.at(4));
+			}
+		}
+		
+		if ((wakertimer > 100) || (wakertimer < -100)) wakertimerdir = !wakertimerdir;
+		
+		// Increment wind waker rythym timer
+		if (currentinstrument == INST_WAKER) {
+			if (wakertimerdir) wakertimer -= 4;
+			else wakertimer += 4;
+		}
+		
+		// Keep the waker in rythym for free play
+		if ((currentinstrument == INST_WAKER) && (playingsong.size() > rhythm) && (!freePlay)) {
+			playingsong = "";
+		}
 
         // Change frequence based on circle pad's coordinates
         if (pos.dy > 20 || pos.dy < -20) ndspChnSetRate(0, DEFAULTSAMPLERATE + 74*pos.dy);
         else ndspChnSetRate(0, DEFAULTSAMPLERATE);
+		
+		if (!freePlay && currentinstrument == INST_WAKER) {
+			if (keys & KEY_DLEFT) { 
+				rhythm = 4; 
+				separation = 0; 
+				playingsong = ""; 
+			}
+			else if (keys & KEY_DRIGHT) { 
+				rhythm = 6; 
+				separation = 0;
+				playingsong = ""; 
+			}
+			else if ((released & KEY_DLEFT) || (released & KEY_DRIGHT) && (rhythm != 3)){ 
+				rhythm = 3; 
+				separation = 0; 
+				playingsong = ""; 
+			}
+		}
+		if (separation < 19) ++separation;
 
         // Download missing songs
         if ((keys & KEY_SELECT) && (nsongs < SONGCOUNT)) {
@@ -626,6 +693,10 @@ int main(int argc, char* argv[]) {
             if (nsongs < SONGCOUNT) sftd_draw_text(font, 5, 5, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "WARNING: Some songs are missing.\nYou will be unable to switch out of free play mode.\nPress SELECT to download all missing songs.");
             if (errorflag) sftd_draw_text(font, 5, 48, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("Error while downloading file. "+intToStr(errorcode)).c_str());
             sftd_draw_text(font, 5, 64, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 24, upperStr(playingsong).c_str()); // Note history
+			if (currentinstrument == INST_WAKER && (!freePlay)) {
+				for (int i = 0; i < rhythm; ++i) sf2d_draw_rectangle_rotate(8+i*separation, 100, 10, 10, RGBA8(0x00, 0x00, 0x00, 0xFF), 0.785398);
+				for (int i = 0; i < playingsong.length(); ++i) sf2d_draw_rectangle_rotate(8+i*separation, 100, 10, 10, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 0.785398);
+			}
             sftd_draw_text(font, 5, 205, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("Instrument: "+instruments[currentinstrument].name).c_str()); // Current instrument
 			sftd_draw_text(font, 5, 220, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("Free Play (SEL): "+boolToStr(freePlay)).c_str()); // Free Play status
 
@@ -640,6 +711,22 @@ int main(int argc, char* argv[]) {
 
 			sf2d_draw_texture(optionblock, 20, 40); // Instrument select button
 			sf2d_draw_texture(oinsts, 25, 45); // Instrument select icon
+			
+			// Wind waker rythym bar
+			if (currentinstrument == INST_WAKER) {
+				for (int i = 0; i < 9; ++i) {
+					sf2d_draw_fill_circle(97+(i*7), 60, 2, RGBA8(0x00, 0x00, 0x00, 0xFF));
+				}
+				for (int i = 0; i < 9; ++i) {
+					sf2d_draw_fill_circle(167+(i*7), 60, 2, RGBA8(0x00, 0x00, 0x00, 0xFF));
+				}
+				sf2d_draw_fill_circle(90, 60, 3, RGBA8(0x00, 0x00, 0x00, 0xFF));
+				sf2d_draw_fill_circle(160, 60, 4, RGBA8(255, 51, 51, 0xFF));
+				sf2d_draw_fill_circle(230, 60, 3, RGBA8(0x00, 0x00, 0x00, 0xFF));
+				
+				// White circle
+				sf2d_draw_fill_circle(160+(floor(wakertimer/10)*7), 60, 2, RGBA8(0xFF, 0xFF, 0xFF, 0xFF));
+			}
 
             sf2d_draw_texture(optionblock, 248, 40); // Song select button
 			sf2d_draw_texture(osongs, 253, 45); // Song select icon

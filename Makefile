@@ -21,7 +21,7 @@ SOURCE_DIRS := source
 EXTRA_OUTPUT_FILES :=
 
 LIBRARY_DIRS += $(DEVKITPRO)/libctru $(DEVKITPRO)/portlibs/armv6k
-LIBRARIES += sftd freetype sfil png jpeg z sf2d ctru m
+LIBRARIES += sftd freetype sfil sf2d citro3d png jpeg z bz2 ctru m
 
 BUILD_FLAGS :=
 RUN_FLAGS :=

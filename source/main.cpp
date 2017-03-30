@@ -706,7 +706,7 @@ int main(int argc, char* argv[]) {
         sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
 
             sf2d_draw_texture(bgbot, 0, 0);
-			sftd_draw_text(font, 0, 0, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "v0.4.1 by Leif Ericson and Ryuzaki_MrL.");
+			sftd_draw_text(font, 0, 0, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "v0.5.0 by Leif Ericson and Ryuzaki_MrL.");
 			sftd_draw_text(font, 0, 15, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, "Top screen graphic by Sliter.");
 
 			sf2d_draw_texture(optionblock, 20, 40); // Instrument select button

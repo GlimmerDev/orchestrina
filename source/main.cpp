@@ -39,7 +39,6 @@ using namespace std;
 
 // One wavebuf for each of the current instrument's notes, one for each sound effect, one for the current full song playing
 ndspWaveBuf waveBuf[WAVEBUFCOUNT];
-
 bool wavebufList[WAVEBUFCOUNT];
 
 // Noteset
@@ -53,7 +52,7 @@ typedef struct {
     u8 notes;
     string notestr;
     u32 keys[MAXNOTES];
-} noteset;
+} Noteset;
 
 // Instrument
 typedef struct {
@@ -61,13 +60,13 @@ typedef struct {
     u8 nset;
     u8 songs;
     u16 songlist[MAXSONGSPERINSTRUMENT];
-} instrument;
+} Instrument;
 
 // Song
 typedef struct {
     string name;
     string sequence;
-} song;
+} Song;
 
 // Source
 typedef struct {
@@ -77,20 +76,20 @@ typedef struct {
     bool loop;
     int wbuf;
     int channel;
-} source;
+} Source;
 
-source* notes[MAXNOTES];
+Source* notes[MAXNOTES];
 sf2d_texture* nicons[MAXNOTES];
 
 // Array of notesets
-noteset notesets[3] = {
+Noteset notesets[3] = {
     { 5, "lxyar",  { KEY_L, KEY_X, KEY_Y, KEY_A, KEY_R } },
     { 6, "lxyarb", { KEY_L, KEY_X, KEY_Y, KEY_A, KEY_R, KEY_B } },
     { 5, "ruldn",  { KEY_A, KEY_X, KEY_Y, KEY_B, 0 } }
 };
 
 // Array of songs
-song songs[SONGCOUNT] = {
+Song songs[SONGCOUNT] = {
     { "NULL",                   "------"   }, //  0 - OOT/MM
     { "Zelda's Lullaby",        "xayxay"   }, //  1
     { "Saria's Song",           "ryxryx"   }, //  2
@@ -132,7 +131,7 @@ song songs[SONGCOUNT] = {
 };
 
 // Array of instruments
-instrument instruments[INSTRUMENTCOUNT] = {
+Instrument instruments[INSTRUMENTCOUNT] = {
     { "Ocarina", NOTESET_OOT, 22,
         {  1,  2,  3,  4,  5,  6,
            7,  8,  9, 10, 11, 12,
@@ -303,7 +302,7 @@ int getOpenWavbuf() {
 }
 
 // Initializes an audio source and returns any errors that may occur
-int sourceInit(source *self, const char *filename, int channel, int wbuf = -1) {
+int sourceInit(Source *self, const char *filename, int channel, int wbuf = -1) {
     FILE *file = fopen(filename, "rb");
     if (file) {
         fseek(file, 0, SEEK_END);
@@ -335,7 +334,7 @@ int sourceInit(source *self, const char *filename, int channel, int wbuf = -1) {
 }
 
 // Frees an audio source and its wavebuf
-void sourceFree(source *self) {
+void sourceFree(Source *self) {
     if (self==NULL) return;
     wavebufList[self->wbuf] = false;
     if (waveBuf[self->wbuf].status == NDSP_WBUF_PLAYING || waveBuf[self->wbuf].status==NDSP_WBUF_QUEUED) ndspChnWaveBufClear(self->channel);
@@ -356,7 +355,7 @@ int instrumentInit(u8 id) {
         string spath = "romfs:/sound/notes/"+instruments[id].name+"/"+intToStr(i)+".pcm";
 
         nicons[i] = sfil_load_PNG_file(ipath.c_str(), SF2D_PLACE_RAM);
-        notes[i] = new source;
+        notes[i] = new Source;
 
         int result = sourceInit(notes[i], spath.c_str(), 0);
         if (result!=0) return -1;
@@ -375,7 +374,7 @@ void instrumentFree(u8 id) {
 }
 
 // Plays an initialized audio source on its assigned DSP channel
-int sourcePlay(source *self) { // source:play()
+int sourcePlay(Source *self) { // Source:play()
 
     if (self==NULL || self->wbuf == -1) return -1;
 
@@ -449,9 +448,9 @@ int main(int argc, char* argv[]) {
     memset(waveBuf,0,sizeof(waveBuf));
 
     // Load sound effects
-    source* correct = new source;
-    source* menuOpen = new source;
-    source* menuSelect = new source;
+    Source* correct = new Source;
+    Source* menuOpen = new Source;
+    Source* menuSelect = new Source;
     sourceInit(correct, "romfs:/sound/Correct.pcm", 1);
     sourceInit(menuOpen, "romfs:/sound/Menu-Open.pcm", 1);
     sourceInit(menuSelect, "romfs:/sound/Menu-Select.pcm", 1);
@@ -485,10 +484,9 @@ int main(int argc, char* argv[]) {
 	touchPosition touch;
     circlePosition pos;
 	
-	
 	int wakertimer = 4;
 	bool wakertimerdir = false;
-	int rhythm = 3;
+	u32 rhythm = 3;
 	int separation = 0;
 
     while(aptMainLoop()) {
@@ -505,7 +503,7 @@ int main(int argc, char* argv[]) {
 
 		// Play note on button press (or on rythym for wind waker)
 		if ((currentinstrument != INST_WAKER) || (wakertimer == 0)) {
-			int songLen = playingsong.size();
+			u32 songLen = playingsong.size();
 			for (u32 i = 0; i < notesets[instruments[currentinstrument].nset].notes; i++) {
 				if ((currentinstrument == INST_WAKER) && (held & keyset[i])) {
 					ndspChnWaveBufClear(0);
@@ -561,7 +559,7 @@ int main(int argc, char* argv[]) {
 				separation = 0;
 				playingsong = ""; 
 			}
-			else if ((released & KEY_DLEFT) || (released & KEY_DRIGHT) && (rhythm != 3)){ 
+			else if ((released & KEY_DLEFT) || ((released & KEY_DRIGHT) && (rhythm != 3))){ 
 				rhythm = 3; 
 				separation = 0; 
 				playingsong = ""; 
@@ -694,8 +692,8 @@ int main(int argc, char* argv[]) {
             if (errorflag) sftd_draw_text(font, 5, 48, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("Error while downloading file. "+intToStr(errorcode)).c_str());
             sftd_draw_text(font, 5, 64, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 24, upperStr(playingsong).c_str()); // Note history
 			if (currentinstrument == INST_WAKER && (!freePlay)) {
-				for (int i = 0; i < rhythm; ++i) sf2d_draw_rectangle_rotate(8+i*separation, 100, 10, 10, RGBA8(0x00, 0x00, 0x00, 0xFF), 0.785398);
-				for (int i = 0; i < playingsong.length(); ++i) sf2d_draw_rectangle_rotate(8+i*separation, 100, 10, 10, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 0.785398);
+				for (u32 i = 0; i < rhythm; ++i) sf2d_draw_rectangle_rotate(8+i*separation, 100, 10, 10, RGBA8(0x00, 0x00, 0x00, 0xFF), 0.785398);
+				for (u32 i = 0; i < playingsong.length(); ++i) sf2d_draw_rectangle_rotate(8+i*separation, 100, 10, 10, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 0.785398);
 			}
             sftd_draw_text(font, 5, 205, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("Instrument: "+instruments[currentinstrument].name).c_str()); // Current instrument
 			sftd_draw_text(font, 5, 220, RGBA8(0xFF, 0xFF, 0xFF, 0xFF), 12, ("Free Play (SEL): "+boolToStr(freePlay)).c_str()); // Free Play status
@@ -753,7 +751,7 @@ int main(int argc, char* argv[]) {
             svcSleepThread(1500000000);
 
             // Play the song that was entered
-            source* fullsong = new source;
+            Source* fullsong = new Source;
 
             float alpha = 0;
             bool fade = true;
